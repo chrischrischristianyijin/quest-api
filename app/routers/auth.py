@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi import APIRouter, HTTPException, Depends, status, Form
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from app.models.user import UserCreate, UserLogin, UserResponse
 from app.services.auth_service import AuthService
@@ -44,6 +44,69 @@ async def login(user: UserLogin):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="邮箱或密码错误"
+        )
+
+@router.get("/google/login")
+async def google_login():
+    """Google登录端点 - 返回OAuth URL"""
+    try:
+        # 这里应该返回Google OAuth URL
+        # 暂时返回占位符
+        return {
+            "success": True,
+            "message": "Google登录",
+            "data": {
+                "oauth_url": "https://accounts.google.com/oauth/authorize",
+                "client_id": "YOUR_GOOGLE_CLIENT_ID",
+                "redirect_uri": "YOUR_REDIRECT_URI",
+                "scope": "openid email profile",
+                "response_type": "code"
+            }
+        }
+    except Exception as e:
+        logger.error(f"Google登录失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Google登录服务暂时不可用"
+        )
+
+@router.post("/google/callback")
+async def google_callback(code: str = Form(...)):
+    """Google登录回调 - 处理授权码"""
+    try:
+        # 这里应该处理Google OAuth授权码
+        # 暂时返回占位符
+        return {
+            "success": True,
+            "message": "Google登录回调功能开发中",
+            "data": {
+                "code": code,
+                "note": "需要实现授权码交换access_token的逻辑"
+            }
+        }
+    except Exception as e:
+        logger.error(f"Google登录回调失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Google登录回调处理失败"
+        )
+
+@router.post("/google/token")
+async def google_token_login(id_token: str = Form(...)):
+    """Google Token登录 - 直接使用ID Token"""
+    try:
+        auth_service = AuthService()
+        result = await auth_service.google_login(id_token)
+        return {
+            "success": True,
+            "message": "Google登录成功",
+            "data": result
+        }
+    except Exception as e:
+        logger.error(f"Google Token登录失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Google登录失败"
         )
 
 @router.post("/signout")
