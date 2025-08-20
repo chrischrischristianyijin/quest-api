@@ -28,6 +28,11 @@ async def register(user: UserCreate):
             detail=str(e)
         )
 
+@router.post("/signup", response_model=Dict[str, Any])
+async def signup(user: UserCreate):
+    """用户注册 - signup别名"""
+    return await register(user)
+
 @router.post("/login", response_model=Dict[str, Any])
 async def login(user: UserLogin):
     """用户登录"""

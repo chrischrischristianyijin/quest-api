@@ -33,16 +33,20 @@ class AuthService:
                 "password": user.password
             })
             
-            if response.user:
-                # 如果需要额外的用户资料，可以在这里创建
-                # 但现在直接返回成功，因为用户已经在auth.users表中了
+            # 检查响应结构
+            if hasattr(response, 'user') and response.user:
+                # 注册成功
                 return {
                     "user_id": response.user.id,
                     "email": user.email,
-                    "message": "注册成功"
+                    "message": "注册成功",
+                    "session": response.session.access_token if hasattr(response, 'session') and response.session else None
                 }
+            elif hasattr(response, 'error'):
+                # 有错误
+                raise ValueError(f"注册失败: {response.error}")
             else:
-                raise ValueError("注册失败")
+                raise ValueError("注册失败: 未知错误")
                 
         except Exception as e:
             logger.error(f"注册用户失败: {e}")
@@ -57,20 +61,32 @@ class AuthService:
                 "password": user.password
             })
             
-            if response.user:
-                # 创建JWT令牌
-                access_token = self.create_access_token(
-                    data={"sub": user.email, "user_id": response.user.id}
-                )
+            # 添加调试日志
+            logger.info(f"Supabase登录响应: {response}")
+            logger.info(f"响应类型: {type(response)}")
+            logger.info(f"响应属性: {dir(response)}")
+            
+            # 检查响应结构
+            if hasattr(response, 'user') and response.user:
+                # 登录成功
+                access_token = response.session.access_token if hasattr(response, 'session') and response.session else None
+                
+                logger.info(f"登录成功，用户ID: {response.user.id}")
                 
                 return {
                     "access_token": access_token,
                     "token_type": "bearer",
                     "user_id": response.user.id,
-                    "email": user.email
+                    "email": user.email,
+                    "session": response.session.access_token if hasattr(response, 'session') and response.session else None
                 }
+            elif hasattr(response, 'error'):
+                # 有错误
+                logger.error(f"Supabase登录错误: {response.error}")
+                raise ValueError(f"登录失败: {response.error}")
             else:
-                raise ValueError("登录失败")
+                logger.error(f"未知的响应结构: {response}")
+                raise ValueError("登录失败: 未知错误")
                 
         except Exception as e:
             logger.error(f"用户登录失败: {e}")
@@ -160,7 +176,9 @@ class AuthService:
         try:
             # 尝试从auth.users表获取
             response = self.supabase_service.auth.admin.list_users()
-            user = next((u for u in response.users if u.email == email), None)
+            # 修复：response.users 应该是 response
+            users = response if hasattr(response, '__iter__') else []
+            user = next((u for u in users if hasattr(u, 'email') and u.email == email), None)
             
             if user:
                 return {
@@ -227,7 +245,9 @@ class AuthService:
             # 如果RPC不存在，尝试直接查询
             try:
                 response = self.supabase_service.auth.admin.list_users()
-                return any(u.email == email for u in response.users)
+                # 修复：response.users 应该是 response
+                users = response if hasattr(response, '__iter__') else []
+                return any(hasattr(u, 'email') and u.email == email for u in users)
             except:
                 return False
     
@@ -244,7 +264,9 @@ class AuthService:
             try:
                 # 尝试使用admin API获取用户信息
                 response = self.supabase_service.auth.admin.list_users()
-                user = next((u for u in response.users if u.email == email), None)
+                # 修复：response.users 应该是 response
+                users = response if hasattr(response, '__iter__') else []
+                user = next((u for u in users if hasattr(u, 'email') and u.email == email), None)
                 
                 if user:
                     return {
