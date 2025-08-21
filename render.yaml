@@ -6,17 +6,21 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.9.0
+      - key: SUPABASE_URL
+        value: your_supabase_project_url
+      - key: SUPABASE_ANON_KEY
+        value: your_supabase_anon_key
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        value: your_supabase_service_role_key
+      - key: API_PORT
+        value: 10000
       - key: NODE_ENV
         value: production
-      - key: SUPABASE_URL
-        sync: false
-      - key: SUPABASE_ANON_KEY
-        sync: false
-      - key: SUPABASE_SERVICE_ROLE_KEY
-        sync: false
       - key: JWT_SECRET_KEY
-        sync: false
+        generateValue: true
+      - key: SECRET_KEY
+        generateValue: true
       - key: ALLOWED_ORIGINS
-        value: https://your-app-name.onrender.com
+        value: https://yourdomain.com
+    autoDeploy: true
+    branch: main

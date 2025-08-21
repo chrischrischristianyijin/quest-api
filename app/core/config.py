@@ -6,7 +6,7 @@ class Settings(BaseSettings):
     """应用配置类"""
     
     # API配置
-    API_PORT: int = 3001
+    API_PORT: int = 8080
     API_VERSION: str = "v1"
     
     # 环境配置

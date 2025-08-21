@@ -96,3 +96,7 @@ def get_supabase_service() -> Client:
     if not supabase_service:
         raise RuntimeError("Supabase服务端客户端未初始化")
     return supabase_service
+
+def get_supabase_client() -> Client:
+    """获取Supabase客户端（兼容性函数）"""
+    return get_supabase()
