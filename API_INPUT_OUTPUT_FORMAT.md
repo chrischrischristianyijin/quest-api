@@ -260,6 +260,16 @@ GET /api/v1/insights?page=1&limit=10&user_id=xxx&search=AI
 Authorization: Bearer {token}
 ```
 
+**参数说明：**
+- `page`: 页码（默认1）
+- `limit`: 每页数量（默认10，最大100）
+- `user_id`: 用户ID筛选（可选，不传则默认当前登录用户）
+- `search`: 搜索关键词（可选，在标题和描述中搜索）
+
+**权限控制：**
+- 如果指定`user_id`，只能查看自己的insights
+- 如果不指定`user_id`，默认查看当前登录用户的insights
+
 **响应示例：**
 ```json
 {
@@ -293,6 +303,10 @@ Authorization: Bearer {token}
 GET /api/v1/insights/{insight_id}
 Authorization: Bearer {token}
 ```
+
+**权限控制：**
+- 用户只能访问自己的insights
+- 如果尝试访问其他用户的insight，返回403错误
 
 **响应示例：**
 ```json
@@ -394,6 +408,15 @@ Authorization: Bearer {token}
 GET /api/v1/user-tags?user_id=xxx&page=1&limit=10
 Authorization: Bearer {token}
 ```
+
+**参数说明：**
+- `user_id`: 用户ID筛选（可选，不传则默认当前登录用户）
+- `page`: 页码（默认1）
+- `limit`: 每页数量（默认10，最大100）
+
+**权限控制：**
+- 如果指定`user_id`，只能查看自己的标签
+- 如果不指定`user_id`，默认查看当前登录用户的标签
 
 **响应示例：**
 ```json

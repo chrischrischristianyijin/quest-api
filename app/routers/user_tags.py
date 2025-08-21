@@ -7,7 +7,7 @@ from typing import Dict, Any, List, Optional
 import logging
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api/v1/user-tags", tags=["用户标签管理"])
+router = APIRouter(tags=["用户标签管理"])
 security = HTTPBearer()
 
 @router.get("/", response_model=Dict[str, Any])

@@ -7,7 +7,7 @@ from typing import Dict, Any, List, Optional
 import logging
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api/v1/insights", tags=["见解管理"])
+router = APIRouter(tags=["见解管理"])
 security = HTTPBearer()
 
 @router.get("/", response_model=InsightListResponse)
@@ -27,7 +27,7 @@ async def get_insights(
         result = await insights_service.get_insights(
             page=page,
             limit=limit,
-            user_id=user_id,
+            user_id=user_id or current_user["id"],
             search=search
         )
         
@@ -48,6 +48,13 @@ async def get_insight(
         
         insights_service = InsightsService()
         result = await insights_service.get_insight(insight_id)
+        
+        # 安全检查：确保用户只能访问自己的insights
+        if result.data["user_id"] != current_user["id"]:
+            raise HTTPException(
+                status_code=403, 
+                detail="无权限访问此insight"
+            )
         
         return result
     except Exception as e:

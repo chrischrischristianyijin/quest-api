@@ -7,7 +7,7 @@ from typing import Dict, Any
 import logging
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
+router = APIRouter(tags=["认证"])
 security = HTTPBearer()
 
 @router.post("/register", response_model=Dict[str, Any])

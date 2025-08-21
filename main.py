@@ -69,15 +69,33 @@ app.include_router(insights.router, prefix="/api/v1/insights", tags=["见解"])
 app.include_router(user_tags.router, prefix="/api/v1/user-tags", tags=["用户标签"])
 app.include_router(metadata.router, prefix="/api/v1/metadata", tags=["元数据"])
 
-@app.get("/api/v1/health")
+@app.get("/health")
 async def health_check():
     """健康检查端点"""
-    return {
-        "status": "ok",
-        "timestamp": "2024-01-01T00:00:00.000Z",
-        "environment": os.getenv("NODE_ENV", "development"),
-        "version": "1.0.0"
-    }
+    try:
+        # 检查数据库连接
+        from app.core.database import get_supabase
+        supabase = get_supabase()
+        
+        # 简单的连接测试
+        response = supabase.table('profiles').select('id').limit(1).execute()
+        
+        return {
+            "status": "healthy",
+            "timestamp": "2024-01-01T00:00:00.000Z",
+            "environment": os.getenv("NODE_ENV", "development"),
+            "version": "1.0.0",
+            "database": "connected"
+        }
+    except Exception as e:
+        return {
+            "status": "unhealthy",
+            "timestamp": "2024-01-01T00:00:00.000Z",
+            "environment": os.getenv("NODE_ENV", "development"),
+            "version": "1.0.0",
+            "database": "disconnected",
+            "error": str(e)
+        }
 
 @app.get("/")
 async def root():

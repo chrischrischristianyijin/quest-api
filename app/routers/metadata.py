@@ -14,7 +14,7 @@ from datetime import datetime
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
+router = APIRouter(tags=["元数据"])
 security = HTTPBearer()
 
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):

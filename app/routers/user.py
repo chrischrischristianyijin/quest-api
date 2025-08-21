@@ -7,7 +7,7 @@ from typing import Dict, Any
 import logging
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api/v1/user", tags=["用户管理"])
+router = APIRouter(tags=["用户管理"])
 security = HTTPBearer()
 
 @router.post("/upload-avatar", response_model=Dict[str, Any])
