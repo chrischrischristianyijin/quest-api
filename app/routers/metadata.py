@@ -35,11 +35,11 @@ async def get_metadata():
         }
     }
 
-@router.post("/extract", response_model=Dict[str, Any])
-async def extract_webpage_metadata(
-    url: str = Form(..., description="要提取元数据的网页URL")
+@router.post("/preview", response_model=Dict[str, Any])
+async def preview_metadata(
+    url: str = Form(..., description="要预览元数据的网页URL")
 ):
-    """提取网页元数据"""
+    """预览网页元数据 - 不创建insight，仅预览"""
     try:
         # 验证URL格式
         if not is_valid_url(url):
@@ -51,10 +51,58 @@ async def extract_webpage_metadata(
         # 提取元数据
         metadata = await extract_metadata_from_url(url)
         
+        # 返回预览信息
+        return {
+            "success": True,
+            "message": "元数据预览成功",
+            "data": {
+                "url": url,
+                "title": metadata.get("title", "无标题"),
+                "description": metadata.get("description", ""),
+                "image_url": metadata.get("image_url"),
+                "domain": metadata.get("domain"),
+                "extracted_at": metadata.get("extracted_at"),
+                "preview_note": "这是预览，点击创建按钮将保存为insight"
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"预览元数据失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="预览元数据失败"
+        )
+
+@router.post("/extract", response_model=Dict[str, Any])
+async def extract_webpage_metadata(
+    url: str = Form(..., description="要提取元数据的网页URL")
+):
+    """提取网页元数据 - 仅提取，不创建insight"""
+    try:
+        # 验证URL格式
+        if not is_valid_url(url):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="无效的URL格式"
+            )
+        
+        # 提取元数据
+        metadata = await extract_metadata_from_url(url)
+        
+        # 返回提取的metadata信息
         return {
             "success": True,
             "message": "元数据提取成功",
-            "data": metadata
+            "data": {
+                "url": url,
+                "title": metadata.get("title", "无标题"),
+                "description": metadata.get("description", ""),
+                "image_url": metadata.get("image_url"),
+                "suggested_tags": [],  # 可以基于内容智能推荐标签
+                "domain": metadata.get("domain"),
+                "extracted_at": metadata.get("extracted_at")
+            }
         }
     except HTTPException:
         raise
@@ -73,7 +121,7 @@ async def create_insight_from_url(
     tags: Optional[str] = Form(None, description="标签，用逗号分隔（可选）"),
     current_user: Dict[str, Any] = Depends(get_current_user)
 ):
-    """从URL创建insight"""
+    """从URL创建insight - 先提取metadata，再创建insight"""
     try:
         # 验证URL格式
         if not is_valid_url(url):
@@ -82,28 +130,33 @@ async def create_insight_from_url(
                 detail="无效的URL格式"
             )
         
-        # 提取元数据
+        # 步骤1：提取元数据
         metadata = await extract_metadata_from_url(url)
         
-        # 处理标签
+        # 步骤2：处理用户输入（优先使用用户自定义内容）
+        final_title = title or metadata.get("title", "无标题")
+        final_description = description or metadata.get("description", "")
+        final_image_url = metadata.get("image_url")
+        
+        # 步骤3：处理标签
         tag_list = []
         if tags:
             tag_list = [tag.strip() for tag in tags.split(',') if tag.strip()]
         
-        # 创建insight数据
+        # 步骤4：创建insight数据
         insight_data = {
             "id": str(uuid.uuid4()),
             "user_id": current_user["id"],
             "url": url,
-            "title": title or metadata.get("title", "无标题"),
-            "description": description or metadata.get("description", ""),
-            "image_url": metadata.get("image_url"),
+            "title": final_title,
+            "description": final_description,
+            "image_url": final_image_url,
             "tags": tag_list,
             "created_at": datetime.utcnow().isoformat(),
             "updated_at": datetime.utcnow().isoformat()
         }
         
-        # 保存到数据库
+        # 步骤5：保存到数据库
         supabase = get_supabase()
         response = supabase.table('insights').insert(insight_data).execute()
         
@@ -111,7 +164,7 @@ async def create_insight_from_url(
             return {
                 "success": True,
                 "message": "从URL创建insight成功",
-                "data": response.data[0]
+                "data": response.data[0]  # 直接返回创建的insight
             }
         else:
             raise HTTPException(

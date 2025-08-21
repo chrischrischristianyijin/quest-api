@@ -135,122 +135,185 @@ Authorization: Bearer {token}
 }
 ```
 
-## 🌐 网页元数据提取接口
+## Metadata相关API
 
-### 提取单个网页元数据
-```http
-POST /api/v1/metadata/extract
-Content-Type: application/x-www-form-urlencoded
+### 1. 预览网页元数据
+**POST** `/api/v1/metadata/preview`
 
-url=https://example.com/article
+**功能**: 预览网页的元数据信息，不创建insight
+
+**输入**:
+```json
+{
+  "url": "https://example.com/article"
+}
 ```
 
-**响应示例：**
+**输出**:
 ```json
 {
   "success": true,
+  "message": "元数据预览成功",
   "data": {
     "url": "https://example.com/article",
-    "title": "示例文章标题",
-    "description": "这是一篇关于人工智能的文章...",
+    "title": "文章标题",
+    "description": "文章描述",
     "image_url": "https://example.com/image.jpg",
-    "site_name": "示例网站",
-    "type": "article",
-    "extraction_time": "2024-01-15T10:30:00Z"
+    "domain": "example.com",
+    "extracted_at": "2024-01-01T00:00:00.000Z",
+    "preview_note": "这是预览，点击创建按钮将保存为insight"
   }
 }
 ```
 
-### 批量提取元数据
-```http
-POST /api/v1/metadata/batch-extract
-Content-Type: application/json
+### 2. 提取网页元数据
+**POST** `/api/v1/metadata/extract`
 
+**功能**: 提取网页的元数据信息，不创建insight
+
+**输入**:
+```json
 {
-  "urls": [
-    "https://example1.com",
-    "https://example2.com",
-    "https://example3.com"
-  ]
+  "url": "https://example.com/article"
 }
 ```
 
-**响应示例：**
+**输出**:
 ```json
 {
   "success": true,
+  "message": "元数据提取成功",
+  "data": {
+    "url": "https://example.com/article",
+    "title": "文章标题",
+    "description": "文章描述",
+    "image_url": "https://example.com/image.jpg",
+    "suggested_tags": [],
+    "domain": "example.com",
+    "extracted_at": "2024-01-01T00:00:00.000Z"
+  }
+}
+```
+
+### 3. 从URL创建Insight（包含Metadata提取）
+**POST** `/api/v1/metadata/create-insight`
+
+**功能**: 先提取网页metadata，再创建insight（两步合一）
+
+**输入**:
+```json
+{
+  "url": "https://example.com/article",
+  "title": "自定义标题（可选）",
+  "description": "自定义描述（可选）",
+  "tags": "tag1,tag2（可选，逗号分隔）"
+}
+```
+
+**输出**:
+```json
+{
+  "success": true,
+  "message": "从URL创建insight成功",
+  "data": {
+    "id": "uuid",
+    "user_id": "user_uuid",
+    "url": "https://example.com/article",
+    "title": "最终标题",
+    "description": "最终描述",
+    "image_url": "https://example.com/image.jpg",
+    "tags": ["tag1", "tag2"],
+    "created_at": "2024-01-01T00:00:00.000Z",
+    "updated_at": "2024-01-01T00:00:00.000Z"
+  }
+}
+```
+
+### 4. 批量提取元数据
+**POST** `/api/v1/metadata/batch-extract`
+
+**功能**: 批量提取多个URL的元数据
+
+**输入**:
+```json
+{
+  "urls": "https://example1.com\nhttps://example2.com\nhttps://example3.com"
+}
+```
+
+**输出**:
+```json
+{
+  "success": true,
+  "message": "批量元数据提取完成",
   "data": [
     {
       "url": "https://example1.com",
-      "title": "网站1标题",
-      "description": "网站1描述",
-      "image_url": "https://example1.com/image.jpg",
-      "status": "success"
+      "success": true,
+      "data": {
+        "title": "标题1",
+        "description": "描述1",
+        "image_url": "图片1",
+        "domain": "example1.com"
+      }
     },
     {
       "url": "https://example2.com",
-      "title": "网站2标题",
-      "description": "网站2描述",
-      "image_url": "https://example2.com/image.jpg",
-      "status": "success"
+      "success": true,
+      "data": {
+        "title": "标题2",
+        "description": "描述2",
+        "image_url": "图片2",
+        "domain": "example2.com"
+      }
     }
   ]
 }
 ```
 
-### 从URL创建insight
-```http
-POST /api/v1/metadata/create-insight
-Authorization: Bearer {token}
-Content-Type: application/json
+### 5. 预览已保存的Insight
+**GET** `/api/v1/metadata/preview/{insight_id}`
 
-{
-  "url": "https://example.com/article",
-  "user_id": "550e8400-e29b-41d4-a716-446655440000",
-  "custom_tags": ["技术", "AI"],
-  "custom_description": "这是一篇很有价值的文章"
-}
-```
+**功能**: 预览已保存的insight，并获取URL的最新metadata
 
-**响应示例：**
+**输出**:
 ```json
 {
   "success": true,
-  "message": "Insight创建成功",
+  "message": "获取insight预览成功",
   "data": {
-    "id": "660e8400-e29b-41d4-a716-446655440000",
-    "user_id": "550e8400-e29b-41d4-a716-446655440000",
+    "id": "insight_uuid",
+    "user_id": "user_uuid",
     "url": "https://example.com/article",
-    "title": "示例文章标题",
-    "description": "这是一篇很有价值的文章",
-    "image_url": "https://example.com/image.jpg",
-    "tags": ["技术", "AI"],
-    "created_at": "2024-01-15T10:30:00Z"
+    "title": "保存的标题",
+    "description": "保存的描述",
+    "image_url": "保存的图片",
+    "tags": ["tag1", "tag2"],
+    "created_at": "2024-01-01T00:00:00.000Z",
+    "latest_metadata": {
+      "title": "最新网页标题",
+      "description": "最新网页描述",
+      "image_url": "最新网页图片"
+    }
   }
 }
 ```
 
-### 预览insight
-```http
-GET /api/v1/metadata/preview/{insight_id}
-Authorization: Bearer {token}
-```
+## 工作流程说明
 
-**响应示例：**
-```json
-{
-  "success": true,
-  "data": {
-    "id": "660e8400-e29b-41d4-a716-446655440000",
-    "url": "https://example.com/article",
-    "title": "示例文章标题",
-    "description": "这是一篇很有价值的文章",
-    "image_url": "https://example.com/image.jpg",
-    "tags": ["技术", "AI"],
-    "preview_url": "https://example.com/preview/660e8400-e29b-41d4-a716-446655440000"
-  }
-}
-```
+### 方式1：分步操作（推荐）
+1. **预览Metadata**: `POST /api/v1/metadata/preview` - 查看网页信息
+2. **创建Insight**: `POST /api/v1/insights` - 手动输入内容并保存
+
+### 方式2：一键操作
+1. **自动创建**: `POST /api/v1/metadata/create-insight` - 自动提取metadata并创建insight
+
+### 核心字段说明
+- **url**: 网页链接（必填）
+- **title**: 标题（自动提取或用户自定义）
+- **description**: 描述（自动提取或用户自定义）
+- **image_url**: 图片地址（自动提取）
+- **tags**: 标签数组（用户自定义）
 
 ## 📚 见解管理接口
 
