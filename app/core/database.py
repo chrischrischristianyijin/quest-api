@@ -1,6 +1,7 @@
 from supabase import create_client, Client
 from app.core.config import settings
 import logging
+import os
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -10,6 +11,36 @@ logger = logging.getLogger(__name__)
 supabase: Client = None
 supabase_service: Client = None
 
+def check_environment_variables():
+    """检查环境变量配置"""
+    logger.info("🔍 检查环境变量配置...")
+    
+    # 检查必需的环境变量 - 使用settings而不是os.getenv
+    required_vars = {
+        'SUPABASE_URL': settings.SUPABASE_URL,
+        'SUPABASE_ANON_KEY': settings.SUPABASE_ANON_KEY,
+        'SUPABASE_SERVICE_ROLE_KEY': settings.SUPABASE_SERVICE_ROLE_KEY
+    }
+    
+    missing_vars = []
+    for var_name, var_value in required_vars.items():
+        if not var_value:
+            missing_vars.append(var_name)
+        else:
+            logger.info(f"✅ {var_name}: {'已设置' if var_value else '未设置'}")
+    
+    if missing_vars:
+        error_msg = f"❌ 缺少必需的环境变量: {', '.join(missing_vars)}"
+        logger.error(error_msg)
+        logger.error("请检查Render平台的环境变量配置")
+        logger.error("确保以下环境变量已设置:")
+        for var in missing_vars:
+            logger.error(f"  {var}")
+        raise ValueError(error_msg)
+    
+    logger.info("✅ 环境变量配置检查通过")
+    return True
+
 async def init_supabase():
     """初始化Supabase连接"""
     global supabase, supabase_service
@@ -17,9 +48,14 @@ async def init_supabase():
     try:
         logger.info("🔧 初始化Supabase连接...")
         
+        # 首先检查环境变量
+        check_environment_variables()
+        
         # 验证配置
         if not settings.SUPABASE_URL or not settings.SUPABASE_ANON_KEY:
             raise ValueError("Supabase配置不完整")
+        
+        logger.info(f"🔗 连接到Supabase: {settings.SUPABASE_URL[:50]}...")
         
         # 创建客户端
         supabase = create_client(
@@ -39,7 +75,9 @@ async def init_supabase():
         
     except Exception as e:
         logger.error(f"❌ Supabase连接初始化失败: {e}")
-        raise
+        # 不要重新抛出异常，让应用继续启动
+        logger.warning("⚠️ Supabase初始化失败，但应用将继续启动")
+        logger.warning("⚠️ 某些功能可能无法正常工作")
 
 async def test_supabase_connection():
     """测试Supabase连接"""
@@ -58,15 +96,15 @@ async def test_supabase_connection():
 async def check_database_structure():
     """检查数据库表结构"""
     try:
-        # 检查users表（如果存在）
+        # 检查profiles表（如果存在）
         try:
-            users_response = supabase_service.table('users').select('id').limit(1).execute()
-            logger.info("✅ users表检查通过")
+            profiles_response = supabase_service.table('profiles').select('id').limit(1).execute()
+            logger.info("✅ profiles表检查通过")
         except Exception as e:
             if "does not exist" in str(e):
-                logger.info("ℹ️ users表不存在，这是正常的（使用Supabase Auth）")
+                logger.info("ℹ️ profiles表不存在，这是正常的")
             else:
-                logger.warning(f"⚠️ users表检查失败: {e}")
+                logger.warning(f"⚠️ profiles表检查失败: {e}")
         
         # 检查insights表（如果存在）
         try:
@@ -87,14 +125,46 @@ async def check_database_structure():
 
 def get_supabase() -> Client:
     """获取Supabase客户端"""
+    global supabase
     if not supabase:
-        raise RuntimeError("Supabase未初始化")
+        # 尝试重新初始化
+        try:
+            logger.warning("⚠️ Supabase客户端未初始化，尝试重新初始化...")
+            import asyncio
+            # 在同步上下文中运行异步函数
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(init_supabase())
+            loop.close()
+            
+            if not supabase:
+                raise RuntimeError("Supabase重新初始化失败")
+        except Exception as e:
+            logger.error(f"❌ Supabase重新初始化失败: {e}")
+            raise RuntimeError(f"Supabase未初始化。请检查环境变量配置：{e}")
+    
     return supabase
 
 def get_supabase_service() -> Client:
     """获取Supabase服务端客户端"""
+    global supabase_service
     if not supabase_service:
-        raise RuntimeError("Supabase服务端客户端未初始化")
+        # 尝试重新初始化
+        try:
+            logger.warning("⚠️ Supabase服务端客户端未初始化，尝试重新初始化...")
+            import asyncio
+            # 在同步上下文中运行异步函数
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(init_supabase())
+            loop.close()
+            
+            if not supabase_service:
+                raise RuntimeError("Supabase服务端客户端重新初始化失败")
+        except Exception as e:
+            logger.error(f"❌ Supabase服务端客户端重新初始化失败: {e}")
+            raise RuntimeError(f"Supabase服务端客户端未初始化。请检查环境变量配置：{e}")
+    
     return supabase_service
 
 def get_supabase_client() -> Client:

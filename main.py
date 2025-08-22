@@ -20,8 +20,13 @@ async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     # 启动时初始化
     print("🚀 Starting Quest API...")
-    await init_supabase()
-    print("✅ Quest API started successfully")
+    try:
+        await init_supabase()
+        print("✅ Quest API started successfully")
+    except Exception as e:
+        print(f"❌ Failed to initialize Supabase: {e}")
+        print("⚠️ 请检查环境变量配置")
+        # 不要阻止应用启动，让用户看到错误信息
     yield
     # 关闭时清理
     print("🔄 Shutting down Quest API...")
@@ -30,7 +35,8 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Quest API",
     description="Quest应用的后端API服务",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 # 中间件配置 - 修复CORS问题
