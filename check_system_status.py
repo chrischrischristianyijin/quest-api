@@ -103,7 +103,7 @@ def check_database_connection():
         # 简单连接测试
         response = supabase.table('profiles').select('id').limit(1).execute()
         
-        if response.error:
+        if hasattr(response, 'error') and response.error:
             print(f"⚠️  数据库连接警告: {response.error}")
         else:
             print("✅ 数据库连接正常")

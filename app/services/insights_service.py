@@ -41,7 +41,8 @@ class InsightsService:
             # 执行查询
             response = query.execute()
             
-            if response.error:
+            # 检查响应状态
+            if hasattr(response, 'error') and response.error:
                 logger.error(f"查询insights失败: {response.error}")
                 raise Exception(f"数据库查询失败: {response.error}")
             
@@ -55,7 +56,7 @@ class InsightsService:
                 count_query = count_query.or_(f"title.ilike.%{search}%,description.ilike.%{search}%")
             
             count_response = count_query.execute()
-            total = count_response.count if count_response.count is not None else 0
+            total = count_response.count if hasattr(count_response, 'count') and count_response.count is not None else 0
             
             # 构建响应
             insight_responses = []
@@ -89,12 +90,69 @@ class InsightsService:
             logger.error(f"获取insights失败: {e}")
             raise Exception(f"获取insights失败: {str(e)}")
     
+    async def get_all_user_insights(
+        self,
+        user_id: Optional[str] = None,
+        search: Optional[str] = None
+    ) -> InsightListResponse:
+        """获取用户所有见解（不分页）"""
+        try:
+            # 构建查询
+            query = self.supabase.table("insights").select("*")
+            
+            # 用户筛选
+            if user_id:
+                query = query.eq("user_id", user_id)
+            
+            # 搜索功能
+            if search:
+                query = query.or_(f"title.ilike.%{search}%,description.ilike.%{search}%")
+            
+            # 按创建时间倒序
+            query = query.order("created_at", desc=True)
+            
+            # 执行查询（不分页）
+            response = query.execute()
+            
+            # 检查响应状态
+            if hasattr(response, 'error') and response.error:
+                logger.error(f"查询所有insights失败: {response.error}")
+                raise Exception(f"数据库查询失败: {response.error}")
+            
+            insights = response.data or []
+            
+            # 构建响应
+            insight_responses = []
+            for insight in insights:
+                insight_responses.append(InsightResponse(
+                    id=insight["id"],
+                    user_id=insight["user_id"],
+                    url=insight.get("url"),
+                    title=insight["title"],
+                    description=insight["description"],
+                    image_url=insight.get("image_url"),
+                    tags=insight.get("tags", []),
+                    created_at=insight["created_at"],
+                    updated_at=insight.get("updated_at")
+                ))
+            
+            return InsightListResponse(
+                success=True,
+                data={
+                    "insights": insight_responses
+                }
+            )
+            
+        except Exception as e:
+            logger.error(f"获取所有insights失败: {e}")
+            raise Exception(f"获取所有insights失败: {str(e)}")
+    
     async def get_insight(self, insight_id: str) -> InsightResponse:
         """获取见解详情"""
         try:
             response = self.supabase.table("insights").select("*").eq("id", insight_id).execute()
             
-            if response.error:
+            if hasattr(response, 'error') and response.error:
                 logger.error(f"查询insight失败: {response.error}")
                 raise Exception(f"数据库查询失败: {response.error}")
             
@@ -142,7 +200,7 @@ class InsightsService:
             # 插入数据库
             response = self.supabase.table("insights").insert(insight_data).execute()
             
-            if response.error:
+            if hasattr(response, 'error') and response.error:
                 logger.error(f"创建insight失败: {response.error}")
                 raise Exception(f"数据库插入失败: {response.error}")
             
@@ -176,7 +234,7 @@ class InsightsService:
             # 检查insight是否存在且属于当前用户
             existing_response = self.supabase.table("insights").select("*").eq("id", insight_id).eq("user_id", user_id).execute()
             
-            if existing_response.error:
+            if hasattr(existing_response, 'error') and existing_response.error:
                 logger.error(f"查询insight失败: {existing_response.error}")
                 raise Exception(f"数据库查询失败: {existing_response.error}")
             
@@ -205,7 +263,7 @@ class InsightsService:
             # 更新数据库
             response = self.supabase.table("insights").update(update_data).eq("id", insight_id).execute()
             
-            if response.error:
+            if hasattr(response, 'error') and response.error:
                 logger.error(f"更新insight失败: {response.error}")
                 raise Exception(f"数据库更新失败: {response.error}")
             
@@ -234,7 +292,7 @@ class InsightsService:
             # 检查insight是否存在且属于当前用户
             existing_response = self.supabase.table("insights").select("id").eq("id", insight_id).eq("user_id", user_id).execute()
             
-            if existing_response.error:
+            if hasattr(existing_response, 'error') and existing_response.error:
                 logger.error(f"查询insight失败: {existing_response.error}")
                 raise Exception(f"数据库查询失败: {existing_response.error}")
             
@@ -244,7 +302,7 @@ class InsightsService:
             # 删除insight
             response = self.supabase.table("insights").delete().eq("id", insight_id).execute()
             
-            if response.error:
+            if hasattr(response, 'error') and response.error:
                 logger.error(f"删除insight失败: {response.error}")
                 raise Exception(f"数据库删除失败: {response.error}")
             

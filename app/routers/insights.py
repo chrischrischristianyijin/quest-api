@@ -18,7 +18,7 @@ async def get_insights(
     search: Optional[str] = Query(None, description="搜索关键词"),
     credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
-    """获取见解列表"""
+    """获取见解列表（分页）"""
     try:
         auth_service = AuthService()
         current_user = await auth_service.get_current_user(credentials.credentials)
@@ -34,6 +34,28 @@ async def get_insights(
         return result
     except Exception as e:
         logger.error(f"获取见解列表失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/all", response_model=InsightListResponse)
+async def get_all_user_insights(
+    user_id: Optional[str] = Query(None, description="用户ID筛选"),
+    search: Optional[str] = Query(None, description="搜索关键词"),
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """获取用户所有见解（不分页）"""
+    try:
+        auth_service = AuthService()
+        current_user = await auth_service.get_current_user(credentials.credentials)
+        
+        insights_service = InsightsService()
+        result = await insights_service.get_all_user_insights(
+            user_id=user_id or current_user["id"],
+            search=search
+        )
+        
+        return result
+    except Exception as e:
+        logger.error(f"获取用户所有见解失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/{insight_id}", response_model=InsightResponse)

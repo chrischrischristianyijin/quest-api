@@ -315,9 +315,9 @@ Authorization: Bearer {token}
 - **image_url**: 图片地址（自动提取）
 - **tags**: 标签数组（用户自定义）
 
-## 📚 见解管理接口
+## �� 见解管理接口
 
-### 获取见解列表
+### 获取见解列表（分页）
 ```http
 GET /api/v1/insights?page=1&limit=10&user_id=xxx&search=AI
 Authorization: Bearer {token}
@@ -357,6 +357,58 @@ Authorization: Bearer {token}
       "total": 25,
       "total_pages": 3
     }
+  }
+}
+```
+
+### 获取用户所有见解（不分页）
+```http
+GET /api/v1/insights/all?user_id=xxx&search=AI
+Authorization: Bearer {token}
+```
+
+**参数说明：**
+- `user_id`: 用户ID筛选（可选，不传则默认当前登录用户）
+- `search`: 搜索关键词（可选，在标题和描述中搜索）
+
+**功能特点：**
+- 一次性获取用户的所有insights，无需分页
+- 适合数据量较小的情况（建议<100条）
+- 响应格式更简洁，不包含分页信息
+
+**权限控制：**
+- 如果指定`user_id`，只能查看自己的insights
+- 如果不指定`user_id`，默认查看当前登录用户的insights
+
+**响应示例：**
+```json
+{
+  "success": true,
+  "data": {
+    "insights": [
+      {
+        "id": "660e8400-e29b-41d4-a716-446655440000",
+        "user_id": "550e8400-e29b-41d4-a716-446655440000",
+        "url": "https://example.com/article",
+        "title": "AI技术发展趋势",
+        "description": "关于人工智能的最新发展...",
+        "image_url": "https://example.com/image.jpg",
+        "tags": ["技术", "AI"],
+        "created_at": "2024-01-15T10:30:00Z",
+        "updated_at": "2024-01-15T10:30:00Z"
+      },
+      {
+        "id": "770e8400-e29b-41d4-a716-446655440000",
+        "user_id": "550e8400-e29b-41d4-a716-446655440000",
+        "url": "https://example.com/article2",
+        "title": "机器学习入门指南",
+        "description": "从零开始学习机器学习...",
+        "image_url": "https://example.com/image2.jpg",
+        "tags": ["技术", "机器学习"],
+        "created_at": "2024-01-14T10:30:00Z",
+        "updated_at": "2024-01-14T10:30:00Z"
+      }
+    ]
   }
 }
 ```
@@ -873,16 +925,48 @@ const tagResponse = await fetch('/api/v1/user-tags', {
 });
 ```
 
+### 5. 获取用户所有insights
+```javascript
+// 获取当前用户的所有insights（不分页）
+const insightsResponse = await fetch('/api/v1/insights/all', {
+  method: 'GET',
+  headers: {
+    'Authorization': `Bearer ${access_token}`
+  }
+});
+
+const insightsData = await insightsResponse.json();
+
+if (insightsData.success) {
+  const insights = insightsData.data.insights;
+  console.log(`用户共有 ${insights.length} 条insights`);
+  
+  // 渲染所有insights
+  insights.forEach(insight => {
+    console.log(`- ${insight.title}: ${insight.description}`);
+  });
+}
+
+// 或者获取指定用户的所有insights
+const userInsightsResponse = await fetch('/api/v1/insights/all?user_id=550e8400-e29b-41d4-a716-446655440000', {
+  method: 'GET',
+  headers: {
+    'Authorization': `Bearer ${access_token}`
+  }
+});
+```
+
 ## 🎯 总结
 
 Quest API 提供完整的智能书签和知识管理功能：
 
-- **26个API端点**，覆盖用户、内容、标签等核心功能
+- **27个API端点**，覆盖用户、内容、标签等核心功能
 - **标准化响应格式**，统一的成功/错误处理
 - **完整的CRUD操作**，支持见解、标签管理
 - **智能元数据提取**，一键保存网页内容
 - **用户认证系统**，支持邮箱密码和Google OAuth
 - **用户资料管理**，支持昵称、头像、个人简介
+- **灵活的insights获取**，支持分页和一次性获取所有
 
 所有接口都遵循RESTful设计原则，支持分页、搜索、筛选等高级功能。
 

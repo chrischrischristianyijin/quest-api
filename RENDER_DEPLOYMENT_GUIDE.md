@@ -1,40 +1,66 @@
-# 🚀 Quest API Render 部署指南
+# Quest API 部署指南
 
-## 📋 部署前准备
+## 🚀 本地开发环境配置
 
-### 1. 环境变量配置
+在开始部署之前，你需要先配置本地开发环境：
 
-在Render部署之前，你需要设置以下环境变量：
+### 1. 创建环境配置文件
+
+在项目根目录创建 `.env` 文件：
 
 ```bash
-# Supabase配置（必需）
-SUPABASE_URL=your_supabase_project_url
-SUPABASE_ANON_KEY=your_supabase_anon_key
-SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
+# 复制示例文件
+cp .env.example .env
 
-# API配置
-API_PORT=10000
-NODE_ENV=production
-
-# JWT配置（生产环境请使用强密钥）
-JWT_SECRET_KEY=your-super-secret-jwt-key-change-in-production
-SECRET_KEY=your-super-secret-key-change-in-production
-
-# CORS配置（生产环境）
-ALLOWED_ORIGINS=https://yourdomain.com,https://www.yourdomain.com
+# 或者手动创建
+touch .env
 ```
 
-### 2. 获取Supabase配置
+### 2. 配置Supabase环境变量
 
-1. 登录 [Supabase](https://supabase.com)
+编辑 `.env` 文件，添加以下内容：
+
+```env
+# Supabase配置
+SUPABASE_URL=https://your-project-id.supabase.co
+SUPABASE_ANON_KEY=your-anon-key-here
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key-here
+
+# JWT配置
+JWT_SECRET_KEY=your-secret-key-here
+JWT_ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=30
+
+# API配置
+API_PORT=8080
+DEBUG=true
+```
+
+### 3. 获取Supabase配置信息
+
+1. 登录 [Supabase Dashboard](https://app.supabase.com)
 2. 选择你的项目
-3. 进入 Settings → API
+3. 进入 **Settings** → **API**
 4. 复制以下信息：
    - **Project URL** → `SUPABASE_URL`
    - **anon public** → `SUPABASE_ANON_KEY`
    - **service_role secret** → `SUPABASE_SERVICE_ROLE_KEY`
 
-## 🌐 Render部署步骤
+### 4. 测试本地环境
+
+```bash
+# 安装依赖
+pip3 install -r requirements.txt
+
+# 启动API服务器
+python3 main.py
+```
+
+如果看到 "🚀 Quest API 启动成功！" 说明配置正确。
+
+---
+
+## 🌐 Render部署配置
 
 ### 1. 连接GitHub仓库
 

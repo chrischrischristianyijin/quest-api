@@ -33,7 +33,8 @@ class UserTagService:
             
             response = query.execute()
             
-            if response.error:
+            # 检查响应状态
+            if hasattr(response, 'error') and response.error:
                 logger.error(f"查询用户标签失败: {response.error}")
                 raise Exception(f"数据库查询失败: {response.error}")
             
@@ -45,7 +46,7 @@ class UserTagService:
                 count_query = count_query.eq("user_id", user_id)
             
             count_response = count_query.execute()
-            total = count_response.count if count_response.count is not None else 0
+            total = count_response.count if hasattr(count_response, 'count') and count_response.count is not None else 0
             
             return {
                 "success": True,
@@ -67,7 +68,8 @@ class UserTagService:
         try:
             response = self.supabase.table("user_tags").select("*").eq("id", tag_id).execute()
             
-            if response.error:
+            # 检查响应状态
+            if hasattr(response, 'error') and response.error:
                 logger.error(f"查询标签失败: {response.error}")
                 raise Exception(f"数据库查询失败: {response.error}")
             
@@ -103,7 +105,8 @@ class UserTagService:
             # 插入数据库
             response = self.supabase.table("user_tags").insert(tag_data_to_insert).execute()
             
-            if response.error:
+            # 检查响应状态
+            if hasattr(response, 'error') and response.error:
                 logger.error(f"创建标签失败: {response.error}")
                 raise Exception(f"数据库插入失败: {response.error}")
             
@@ -137,7 +140,8 @@ class UserTagService:
             # 检查标签是否存在且属于当前用户
             existing_response = self.supabase.table("user_tags").select("*").eq("id", tag_id).eq("user_id", user_id).execute()
             
-            if existing_response.error:
+            # 检查响应状态
+            if hasattr(existing_response, 'error') and existing_response.error:
                 logger.error(f"查询标签失败: {existing_response.error}")
                 raise Exception(f"数据库查询失败: {existing_response.error}")
             
@@ -159,7 +163,8 @@ class UserTagService:
             # 更新数据库
             response = self.supabase.table("user_tags").update(update_data).eq("id", tag_id).execute()
             
-            if response.error:
+            # 检查响应状态
+            if hasattr(response, 'error') and response.error:
                 logger.error(f"更新标签失败: {response.error}")
                 raise Exception(f"数据库更新失败: {response.error}")
             
@@ -185,7 +190,8 @@ class UserTagService:
             # 检查标签是否存在且属于当前用户
             existing_response = self.supabase.table("user_tags").select("id").eq("id", tag_id).eq("user_id", user_id).execute()
             
-            if existing_response.error:
+            # 检查响应状态
+            if hasattr(existing_response, 'error') and existing_response.error:
                 logger.error(f"查询标签失败: {existing_response.error}")
                 raise Exception(f"数据库查询失败: {existing_response.error}")
             
@@ -195,7 +201,8 @@ class UserTagService:
             # 删除标签
             response = self.supabase.table("user_tags").delete().eq("id", tag_id).execute()
             
-            if response.error:
+            # 检查响应状态
+            if hasattr(response, 'error') and response.error:
                 logger.error(f"删除标签失败: {response.error}")
                 raise Exception(f"数据库删除失败: {response.error}")
             
@@ -215,11 +222,11 @@ class UserTagService:
         try:
             # 获取标签总数
             tags_response = self.supabase.table("user_tags").select("id", count="exact").eq("user_id", user_id).execute()
-            total_tags = tags_response.count if tags_response.count is not None else 0
+            total_tags = tags_response.count if hasattr(tags_response, 'count') and tags_response.count is not None else 0
             
             # 获取insights总数
             insights_response = self.supabase.table("insights").select("id", count="exact").eq("user_id", user_id).execute()
-            total_insights = insights_response.count if insights_response.count is not None else 0
+            total_insights = insights_response.count if hasattr(insights_response, 'count') and insights_response.count is not None else 0
             
             # 获取最常用的标签（通过insights表中的tags字段统计）
             insights_response = self.supabase.table("insights").select("tags").eq("user_id", user_id).execute()
@@ -267,7 +274,8 @@ class UserTagService:
         try:
             response = self.supabase.table("user_tags").select("*").eq("user_id", user_id).ilike("name", f"%{query}%").execute()
             
-            if response.error:
+            # 检查响应状态
+            if hasattr(response, 'error') and response.error:
                 logger.error(f"搜索标签失败: {response.error}")
                 raise Exception(f"数据库查询失败: {response.error}")
             
