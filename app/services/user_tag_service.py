@@ -88,13 +88,12 @@ class UserTagService:
     async def create_tag(self, tag_data: Dict[str, Any], user_id: str) -> Dict[str, Any]:
         """创建新标签"""
         try:
-            # 生成UUID
-            tag_id = str(uuid.uuid4())
+            # 让数据库自动生成UUID，而不是手动生成
             current_time = datetime.utcnow().isoformat()
             
             # 准备数据
             tag_data_to_insert = {
-                "id": tag_id,
+                # 移除手动UUID生成，让数据库自动生成
                 "user_id": user_id,
                 "name": tag_data["name"],
                 "color": tag_data["color"],
@@ -110,6 +109,12 @@ class UserTagService:
                 logger.error(f"创建标签失败: {response.error}")
                 raise Exception(f"数据库插入失败: {response.error}")
             
+            # 从响应中获取自动生成的UUID
+            created_tag = response.data[0] if response.data else None
+            if not created_tag:
+                raise Exception("标签创建失败，未返回数据")
+            
+            tag_id = created_tag.get('id')
             logger.info(f"成功创建标签: {tag_id}")
             
             return {

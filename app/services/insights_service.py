@@ -231,13 +231,14 @@ class InsightsService:
         try:
             supabase = get_supabase()
             
-            # 准备insight数据（不包含tags）
+            # 准备insight数据（不包含tags，让数据库自动生成UUID）
             insight_insert_data = {
                 'title': insight_data.title,
                 'description': insight_data.description,
                 'url': insight_data.url,
                 'image_url': insight_data.image_url,
                 'user_id': str(user_id)
+                # 移除手动UUID生成，让数据库自动生成
             }
             
             # 创建insight

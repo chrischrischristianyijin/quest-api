@@ -145,7 +145,7 @@ async def create_insight_from_url(
         
         # 步骤4：创建insight数据
         insight_data = {
-            "id": str(uuid.uuid4()),
+            # 移除手动UUID生成，让数据库自动生成
             "user_id": current_user["id"],
             "url": url,
             "title": final_title,
