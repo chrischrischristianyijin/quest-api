@@ -262,37 +262,39 @@ Authorization: Bearer {token}
 }
 ```
 
-### 创建新见解
+### 创建新见解（从URL自动获取metadata）
 ```http
 POST /api/v1/insights
 Authorization: Bearer {token}
 Content-Type: application/json
 
 {
-  "title": "AI技术发展趋势",
-  "description": "关于人工智能的最新发展...",
   "url": "https://example.com/article",
-  "image_url": "https://example.com/image.jpg",
   "thought": "这个领域发展很快，值得深入研究",
-  "tag_names": ["技术", "AI", "机器学习"]
+  "tag_ids": [
+    "550e8400-e29b-41d4-a716-446655440001",
+    "550e8400-e29b-41d4-a716-446655440002",
+    "550e8400-e29b-41d4-a716-446655440003"
+  ]
 }
 ```
 
 **字段说明：**
-- **`title`** (必需): 见解标题，1-200字符
-- **`description`** (可选): 见解描述，最大3000字符
-- **`url`** (可选): 相关链接，最大500字符
-- **`image_url`** (可选): 图片地址，最大500字符
+- **`url`** (必需): 网页URL，最大500字符，后端会自动提取metadata
 - **`thought`** (可选): 用户的想法/备注，最大2000字符
-- **`tag_names`** (可选): 标签名称数组，会自动创建或关联现有标签
+- **`tag_ids`** (可选): 标签ID数组，直接关联用户已有的标签
+
+**自动metadata提取：**
+- **`title`**: 自动从网页提取（优先og:title，其次title标签，最后h1标签）
+- **`description`**: 自动从网页提取（优先og:description，其次description meta标签，最后第一个p标签）
+- **`image_url`**: 自动从网页提取（优先og:image，其次第一个img标签）
 
 **标签处理逻辑：**
-- 前端传入标签名称数组：`["技术", "AI", "机器学习"]`
-- 后端智能处理：
-  1. 检查用户是否已有同名标签
-  2. 如果存在，使用现有标签的ID
-  3. 如果不存在，自动创建新标签并分配颜色
-  4. 通过 `insight_tags` 表建立多对多关联关系
+- 前端传入标签ID数组：`["550e8400-e29b-41d4-a716-446655440001", "550e8400-e29b-41d4-a716-446655440002"]`
+- 后端直接处理：
+  1. 验证所有标签ID是否属于当前用户
+  2. 直接通过 `insight_tags` 表建立多对多关联关系
+  3. 无需创建新标签，使用现有标签
 - 响应中返回完整的标签对象（包含ID、名称、颜色等）
 
 **响应示例：**
@@ -340,7 +342,11 @@ Content-Type: application/json
   "title": "更新后的标题",
   "description": "更新后的描述",
   "thought": "更新后的想法和备注",
-  "tag_names": ["技术", "AI", "机器学习"]
+  "tag_ids": [
+    "550e8400-e29b-41d4-a716-446655440001",
+    "550e8400-e29b-41d4-a716-446655440002",
+    "550e8400-e29b-41d4-a716-446655440003"
+  ]
 }
 ```
 

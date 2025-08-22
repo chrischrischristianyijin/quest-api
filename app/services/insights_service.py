@@ -255,9 +255,9 @@ class InsightsService:
             insight_id = UUID(insight['id'])
             
             # 处理标签
-            if insight_data.tag_names:
-                tags_result = await InsightTagService.update_insight_tags(
-                    insight_id, insight_data.tag_names, user_id
+            if insight_data.tag_ids:
+                tags_result = await InsightTagService.update_insight_tags_by_ids(
+                    insight_id, insight_data.tag_ids, user_id
                 )
                 if not tags_result.get('success'):
                     logger.warning(f"创建insight成功，但标签处理失败: {tags_result.get('message')}")
@@ -308,9 +308,9 @@ class InsightsService:
                     return {"success": False, "message": "更新insight失败"}
             
             # 处理标签更新
-            if insight_data.tag_names is not None:
-                tags_result = await InsightTagService.update_insight_tags(
-                    insight_id, insight_data.tag_names, user_id
+            if insight_data.tag_ids is not None:
+                tags_result = await InsightTagService.update_insight_tags_by_ids(
+                    insight_id, insight_data.tag_ids, user_id
                 )
                 if not tags_result.get('success'):
                     logger.warning(f"更新insight成功，但标签处理失败: {tags_result.get('message')}")

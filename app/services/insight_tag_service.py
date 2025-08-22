@@ -149,3 +149,54 @@ class InsightTagService:
         except Exception as e:
             logger.error(f"获取insight标签失败: {str(e)}")
             return {"success": False, "message": f"获取标签失败: {str(e)}"}
+
+    @staticmethod
+    async def update_insight_tags_by_ids(insight_id: UUID, tag_ids: List[UUID], user_id: UUID) -> dict:
+        """通过标签ID更新insight的标签（替换现有标签）"""
+        try:
+            supabase = get_supabase()
+            
+            # 检查insight是否属于该用户
+            insight_response = supabase.table('insights').select('user_id').eq('id', str(insight_id)).execute()
+            if hasattr(insight_response, 'error') and insight_response.error:
+                return {"success": False, "message": "Insight不存在"}
+            
+            if not insight_response.data:
+                return {"success": False, "message": "Insight不存在"}
+            
+            if insight_response.data[0]['user_id'] != str(user_id):
+                return {"success": False, "message": "无权操作此insight"}
+            
+            # 验证所有标签是否属于该用户
+            if tag_ids:
+                tags_response = supabase.table('user_tags').select('id').in_('id', [str(tag_id) for tag_id in tag_ids]).eq('user_id', str(user_id)).execute()
+                if hasattr(tags_response, 'error') and tags_response.error:
+                    return {"success": False, "message": "验证标签失败"}
+                
+                valid_tag_ids = [str(tag['id']) for tag in tags_response.data]
+                invalid_tag_ids = [str(tag_id) for tag_id in tag_ids if str(tag_id) not in valid_tag_ids]
+                
+                if invalid_tag_ids:
+                    return {"success": False, "message": f"以下标签不存在或无权限: {invalid_tag_ids}"}
+            
+            # 删除现有标签关联
+            delete_response = supabase.table('insight_tags').delete().eq('insight_id', str(insight_id)).execute()
+            if hasattr(delete_response, 'error') and delete_response.error:
+                logger.error(f"删除现有标签关联失败: {delete_response.error}")
+                return {"success": False, "message": "更新标签失败"}
+            
+            # 创建新的标签关联
+            if tag_ids:
+                for tag_id in tag_ids:
+                    # 直接创建标签关联（标签已存在且已验证权限）
+                    supabase.table('insight_tags').insert({
+                        'insight_id': str(insight_id),
+                        'tag_id': str(tag_id),
+                        'user_id': str(user_id)
+                    }).execute()
+            
+            return {"success": True, "message": "标签更新成功"}
+            
+        except Exception as e:
+            logger.error(f"通过ID更新insight标签失败: {str(e)}")
+            return {"success": False, "message": f"更新标签失败: {str(e)}"}

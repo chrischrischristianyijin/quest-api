@@ -5,7 +5,7 @@ from uuid import UUID
 
 class InsightBase(BaseModel):
     """Insight基础模型"""
-    title: str = Field(..., min_length=1, max_length=200, description="见解标题")
+    title: Optional[str] = Field(None, min_length=1, max_length=200, description="见解标题")
     description: Optional[str] = Field(None, max_length=3000, description="见解描述")
     url: Optional[str] = Field(None, max_length=500, description="相关链接")
     image_url: Optional[str] = Field(None, max_length=500, description="图片地址")
@@ -13,7 +13,14 @@ class InsightBase(BaseModel):
 
 class InsightCreate(InsightBase):
     """创建Insight的请求模型"""
-    tag_names: Optional[List[str]] = Field(None, description="标签名称列表，会自动创建或关联现有标签")
+    url: str = Field(..., max_length=500, description="相关链接（必需）")
+    tag_ids: Optional[List[UUID]] = Field(None, description="标签ID列表，直接关联现有标签")
+
+class InsightCreateFromURL(BaseModel):
+    """从URL创建Insight的请求模型（前端发送）"""
+    url: str = Field(..., max_length=500, description="网页URL（必需）")
+    thought: Optional[str] = Field(None, max_length=2000, description="用户的想法/备注")
+    tag_ids: Optional[List[UUID]] = Field(None, description="标签ID列表，直接关联现有标签")
 
 class InsightUpdate(BaseModel):
     """更新Insight的请求模型"""
@@ -22,7 +29,7 @@ class InsightUpdate(BaseModel):
     url: Optional[str] = Field(None, max_length=500, description="相关链接")
     image_url: Optional[str] = Field(None, max_length=500, description="图片地址")
     thought: Optional[str] = Field(None, max_length=2000, description="用户的想法/备注")
-    tag_names: Optional[List[str]] = Field(None, description="标签名称列表，会替换现有标签")
+    tag_ids: Optional[List[UUID]] = Field(None, description="标签ID列表，会替换现有标签")
 
 class InsightResponse(InsightBase):
     """Insight响应模型"""
