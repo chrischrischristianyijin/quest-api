@@ -24,6 +24,8 @@ async def get_insights(
         auth_service = AuthService()
         current_user = await auth_service.get_current_user(credentials.credentials)
         
+        logger.info(f"用户 {current_user['id']} 请求insights列表，page={page}, limit={limit}, search={search}, user_id={user_id}")
+        
         insights_service = InsightsService()
         result = await insights_service.get_insights(
             user_id=UUID(current_user["id"]),
@@ -34,11 +36,13 @@ async def get_insights(
         )
         
         if not result.get("success"):
+            logger.warning(f"获取insights失败: {result.get('message')}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=result.get("message", "获取insights失败")
             )
         
+        logger.info(f"用户 {current_user['id']} 成功获取insights列表")
         return result
     except Exception as e:
         logger.error(f"获取见解列表失败: {e}")
@@ -55,6 +59,8 @@ async def get_all_user_insights(
         auth_service = AuthService()
         current_user = await auth_service.get_current_user(credentials.credentials)
         
+        logger.info(f"用户 {current_user['id']} 请求所有insights，search={search}, user_id={user_id}")
+        
         insights_service = InsightsService()
         result = await insights_service.get_all_user_insights(
             user_id=UUID(current_user["id"]),
@@ -63,11 +69,13 @@ async def get_all_user_insights(
         )
         
         if not result.get("success"):
+            logger.warning(f"获取所有insights失败: {result.get('message')}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=result.get("message", "获取所有insights失败")
             )
         
+        logger.info(f"用户 {current_user['id']} 成功获取所有insights")
         return result
     except Exception as e:
         logger.error(f"获取用户所有见解失败: {e}")

@@ -22,15 +22,19 @@ class InsightsService:
         try:
             supabase = get_supabase()
             
-            # 确定要查询的用户ID
+            # 确定要查询的用户ID - 如果没有指定target_user_id，默认查询当前用户
             query_user_id = str(target_user_id) if target_user_id else str(user_id)
             
-            # 权限检查：只能查看自己的insights
-            if str(target_user_id) != str(user_id):
+            # 权限检查：如果指定了target_user_id，验证是否为当前用户
+            # 如果没有指定target_user_id，则查询当前用户的insights（这是安全的）
+            if target_user_id and str(target_user_id) != str(user_id):
+                logger.warning(f"用户 {user_id} 尝试访问用户 {target_user_id} 的insights")
                 return {
                     "success": False,
                     "message": "只能查看自己的insights"
                 }
+            
+            logger.info(f"查询用户 {query_user_id} 的insights，当前用户: {user_id}")
             
             # 构建查询
             query = supabase.table('insights').select('*').eq('user_id', query_user_id)
@@ -50,6 +54,7 @@ class InsightsService:
                 return {"success": False, "message": "获取insights失败"}
             
             insights = response.data or []
+            logger.info(f"成功获取 {len(insights)} 条insights")
             
             # 获取总数
             count_query = supabase.table('insights').select('id', count='exact').eq('user_id', query_user_id)
@@ -108,15 +113,19 @@ class InsightsService:
         try:
             supabase = get_supabase()
             
-            # 确定要查询的用户ID
+            # 确定要查询的用户ID - 如果没有指定target_user_id，默认查询当前用户
             query_user_id = str(target_user_id) if target_user_id else str(user_id)
             
-            # 权限检查：只能查看自己的insights
-            if str(target_user_id) != str(user_id):
+            # 权限检查：如果指定了target_user_id，验证是否为当前用户
+            # 如果没有指定target_user_id，则查询当前用户的insights（这是安全的）
+            if target_user_id and str(target_user_id) != str(user_id):
+                logger.warning(f"用户 {user_id} 尝试访问用户 {target_user_id} 的insights")
                 return {
                     "success": False,
                     "message": "只能查看自己的insights"
                 }
+            
+            logger.info(f"查询用户 {query_user_id} 的所有insights，当前用户: {user_id}")
             
             # 构建查询
             query = supabase.table('insights').select('*').eq('user_id', query_user_id)
@@ -136,6 +145,7 @@ class InsightsService:
                 return {"success": False, "message": "获取所有insights失败"}
             
             insights = response.data or []
+            logger.info(f"成功获取 {len(insights)} 条insights")
             
             # 批量获取标签
             insight_ids = [UUID(insight['id']) for insight in insights]
