@@ -6,7 +6,7 @@ from uuid import UUID
 class InsightBase(BaseModel):
     """Insight基础模型"""
     title: str = Field(..., min_length=1, max_length=200, description="见解标题")
-    description: Optional[str] = Field(None, max_length=1000, description="见解描述")
+    description: Optional[str] = Field(None, max_length=3000, description="见解描述")
     url: Optional[str] = Field(None, max_length=500, description="相关链接")
     image_url: Optional[str] = Field(None, max_length=500, description="图片地址")
     thought: Optional[str] = Field(None, max_length=2000, description="用户的想法/备注")
@@ -18,7 +18,7 @@ class InsightCreate(InsightBase):
 class InsightUpdate(BaseModel):
     """更新Insight的请求模型"""
     title: Optional[str] = Field(None, min_length=1, max_length=200, description="见解标题")
-    description: Optional[str] = Field(None, max_length=1000, description="见解描述")
+    description: Optional[str] = Field(None, max_length=3000, description="见解描述")
     url: Optional[str] = Field(None, max_length=500, description="相关链接")
     image_url: Optional[str] = Field(None, max_length=500, description="图片地址")
     thought: Optional[str] = Field(None, max_length=2000, description="用户的想法/备注")

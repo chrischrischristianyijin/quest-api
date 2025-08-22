@@ -45,37 +45,7 @@ def test_metadata_extraction():
         except Exception as e:
             print(f"❌ 请求失败: {e}")
 
-def test_batch_extraction():
-    """测试批量元数据提取"""
-    print("\n🔍 测试批量元数据提取...")
-    
-    urls = """
-https://www.python.org/
-https://fastapi.tiangolo.com/
-https://supabase.com/
-    """.strip()
-    
-    try:
-        response = requests.post(
-            f"{BASE_URL}/metadata/batch-extract",
-            data={"urls": urls}
-        )
-        
-        print(f"状态码: {response.status_code}")
-        
-        if response.status_code == 200:
-            result = response.json()
-            print("✅ 批量提取成功:")
-            for item in result['data']:
-                status = "✅" if item['success'] else "❌"
-                print(f"   {status} {item['url']}")
-                if not item['success']:
-                    print(f"      错误: {item['error']}")
-        else:
-            print(f"❌ 批量提取失败: {response.text}")
-            
-    except Exception as e:
-        print(f"❌ 请求失败: {e}")
+
 
 def test_create_insight_from_url():
     """测试从URL创建insight（需要认证）"""
@@ -91,14 +61,7 @@ def test_create_insight_from_url():
     print("  - description: 自定义描述（可选）")
     print("  - tags: 标签1,标签2,标签3（可选）")
 
-def test_insight_preview():
-    """测试insight预览功能（需要认证）"""
-    print("\n🔍 测试insight预览功能...")
-    
-    print("⚠️  这个功能需要认证，请先登录获取access_token")
-    print("💡 使用示例:")
-    print("GET /api/v1/metadata/preview/{insight_id}")
-    print("Headers: Authorization: Bearer <access_token>")
+
 
 def show_api_examples():
     """显示API使用示例"""
@@ -109,9 +72,7 @@ def show_api_examples():
     print("POST /api/v1/metadata/extract")
     print("Form Data: url=https://www.python.org/")
     
-    print("\n🔹 批量提取多个URL的元数据:")
-    print("POST /api/v1/metadata/batch-extract")
-    print("Form Data: urls=https://url1.com\\nhttps://url2.com")
+
     
     print("\n🔹 从URL创建insight:")
     print("POST /api/v1/metadata/create-insight")
@@ -122,9 +83,7 @@ def show_api_examples():
     print("  - description: Python编程语言官方网站")
     print("  - tags: Python,编程,官网")
     
-    print("\n🔹 预览insight内容:")
-    print("GET /api/v1/metadata/preview/{insight_id}")
-    print("Headers: Authorization: Bearer <access_token>")
+
 
 def show_frontend_integration():
     """显示前端集成示例"""
@@ -166,18 +125,7 @@ const createInsightFromUrl = async (url, customData = {}) => {
   return response.json();
 };
 
-// 批量提取元数据
-const batchExtractMetadata = async (urls) => {
-  const formData = new FormData();
-  formData.append('urls', urls.join('\\n'));
-  
-  const response = await fetch('/api/v1/metadata/batch-extract', {
-    method: 'POST',
-    body: formData
-  });
-  
-  return response.json();
-};
+
     """)
 
 def main():
@@ -188,11 +136,9 @@ def main():
     try:
         # 测试不需要认证的API
         test_metadata_extraction()
-        test_batch_extraction()
         
         # 显示需要认证的API示例
         test_create_insight_from_url()
-        test_insight_preview()
         
         # 显示API使用示例
         show_api_examples()

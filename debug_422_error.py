@@ -218,8 +218,7 @@ async def check_api_endpoints():
     endpoints = [
         "/metadata/create-insight",
         "/insights",
-        "/metadata/extract",
-        "/metadata/preview"
+            "/metadata/extract"
     ]
     
     async with httpx.AsyncClient() as client:

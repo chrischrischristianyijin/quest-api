@@ -114,43 +114,7 @@ async def google_token_login(id_token: str = Form(...)):
         logger.error(f"Google ID Token登录失败: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Google ID Token登录处理失败"
-        )
-
-@router.post("/cleanup-duplicate")
-async def cleanup_duplicate_registration(email: str = Form(...)):
-    """清理重复注册（管理员功能）"""
-    try:
-        auth_service = AuthService()
-        duplicate_check = await auth_service.check_duplicate_registration(email)
-        
-        if duplicate_check["is_duplicate"]:
-            # 清理重复注册
-            if duplicate_check["user_id"]:
-                auth_service.supabase_service.auth.admin.delete_user(duplicate_check["user_id"])
-                logger.info(f"✅ 已清理重复注册: {email}")
-                
-                return {
-                    "success": True,
-                    "message": "重复注册清理成功",
-                    "data": {
-                        "email": email,
-                        "cleaned_user_id": duplicate_check["user_id"],
-                        "note": "现在可以重新注册了"
-                    }
-                }
-        else:
-            return {
-                "success": False,
-                "message": "未检测到重复注册",
-                "data": duplicate_check
-            }
-            
-    except Exception as e:
-        logger.error(f"清理重复注册失败: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"清理重复注册失败: {str(e)}"
+            detail="Google登录回调处理失败"
         )
 
 @router.post("/signout")

@@ -1,15 +1,15 @@
 
 from fastapi import APIRouter, HTTPException, Depends, status, Form
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from app.models.insight import InsightCreate
+
 from app.services.auth_service import AuthService
 from app.core.database import get_supabase
 from typing import Dict, Any, Optional
 import logging
 import httpx
-import re
+
 from bs4 import BeautifulSoup
-import uuid
+
 from datetime import datetime
 from urllib.parse import urlparse
 
@@ -35,44 +35,7 @@ async def get_metadata():
         }
     }
 
-@router.post("/preview", response_model=Dict[str, Any])
-async def preview_metadata(
-    url: str = Form(..., description="要预览元数据的网页URL")
-):
-    """预览网页元数据 - 不创建insight，仅预览"""
-    try:
-        # 验证URL格式
-        if not is_valid_url(url):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="无效的URL格式"
-            )
-        
-        # 提取元数据
-        metadata = await extract_metadata_from_url(url)
-        
-        # 返回预览信息
-        return {
-            "success": True,
-            "message": "元数据预览成功",
-            "data": {
-                "url": url,
-                "title": metadata.get("title", "无标题"),
-                "description": metadata.get("description", ""),
-                "image_url": metadata.get("image_url"),
-                "domain": metadata.get("domain"),
-                "extracted_at": metadata.get("extracted_at"),
-                "preview_note": "这是预览，点击创建按钮将保存为insight"
-            }
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"预览元数据失败: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="预览元数据失败"
-        )
+
 
 @router.post("/extract", response_model=Dict[str, Any])
 async def extract_webpage_metadata(
@@ -180,56 +143,7 @@ async def create_insight_from_url(
             detail="创建insight失败"
         )
 
-@router.post("/batch-extract", response_model=Dict[str, Any])
-async def batch_extract_metadata(
-    urls: str = Form(..., description="多个URL，用换行符分隔")
-):
-    """批量提取多个URL的元数据"""
-    try:
-        url_list = [url.strip() for url in urls.split('\n') if url.strip()]
-        
-        if len(url_list) > 10:  # 限制批量处理数量
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="一次最多处理10个URL"
-            )
-        
-        results = []
-        for url in url_list:
-            try:
-                if is_valid_url(url):
-                    metadata = await extract_metadata_from_url(url)
-                    results.append({
-                        "url": url,
-                        "success": True,
-                        "data": metadata
-                    })
-                else:
-                    results.append({
-                        "url": url,
-                        "success": False,
-                        "error": "无效的URL格式"
-                    })
-            except Exception as e:
-                results.append({
-                    "url": url,
-                    "success": False,
-                    "error": str(e)
-                })
-        
-        return {
-            "success": True,
-            "message": "批量元数据提取完成",
-            "data": results
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"批量提取元数据失败: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="批量提取失败"
-        )
+
 
 def is_valid_url(url: str) -> bool:
     """验证URL格式"""
