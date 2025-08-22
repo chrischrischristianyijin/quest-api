@@ -84,6 +84,20 @@ class AuthService:
             if await self.check_email_exists(user.email):
                 raise ValueError("邮箱已被注册")
             
+            # 检查是否存在重复注册情况
+            duplicate_check = await self.check_duplicate_registration(user.email)
+            if duplicate_check["is_duplicate"]:
+                logger.warning(f"⚠️ 检测到重复注册: {user.email}, user_id: {duplicate_check['user_id']}")
+                
+                # 尝试清理重复注册：删除auth用户，重新开始
+                try:
+                    if duplicate_check["user_id"]:
+                        self.supabase_service.auth.admin.delete_user(duplicate_check["user_id"])
+                        logger.info(f"✅ 已清理重复注册的auth用户: {user.email}")
+                except Exception as cleanup_error:
+                    logger.error(f"⚠️ 清理重复注册失败: {cleanup_error}")
+                    raise ValueError("检测到重复注册，请稍后重试或联系客服")
+            
             # 使用Supabase Auth注册用户
             response = self.supabase.auth.sign_up({
                 "email": user.email,
@@ -93,41 +107,62 @@ class AuthService:
             if hasattr(response, 'user') and response.user:
                 user_id = response.user.id
                 
-                # 创建用户资料
-                profile_data = {
-                    "id": user_id,
-                    "nickname": user.nickname,
-                    "created_at": datetime.utcnow().isoformat(),
-                    "updated_at": datetime.utcnow().isoformat()
-                }
-                
-                profile_response = self.supabase_service.table('profiles').insert(profile_data).execute()
-                
-                if profile_response.data:
-                    logger.info(f"✅ 用户资料创建成功: {user.email}")
-                    
-                    # 为新用户添加默认标签
-                    await self.add_default_tags_for_user(user_id)
-                    
-                    # 获取访问令牌
-                    access_token = response.session.access_token if hasattr(response, 'session') and response.session else None
-                    
-                    return {
-                        "success": True,
-                        "message": "用户注册成功",
-                        "data": {
-                            "user": {
-                                "id": user_id,
-                                "email": user.email,
-                                "nickname": user.nickname,
-                                "created_at": profile_data["created_at"]
-                            },
-                            "access_token": access_token,
-                            "token_type": "bearer"
-                        }
+                try:
+                    # 创建用户资料
+                    profile_data = {
+                        "id": user_id,
+                        "nickname": user.nickname,
+                        "created_at": datetime.utcnow().isoformat(),
+                        "updated_at": datetime.utcnow().isoformat()
                     }
-                else:
-                    raise ValueError("用户资料创建失败")
+                    
+                    profile_response = self.supabase_service.table('profiles').insert(profile_data).execute()
+                    
+                    if profile_response.data:
+                        logger.info(f"✅ 用户资料创建成功: {user.email}")
+                        
+                        # 为新用户添加默认标签
+                        await self.add_default_tags_for_user(user_id)
+                        
+                        # 获取访问令牌
+                        access_token = response.session.access_token if hasattr(response, 'session') and response.session else None
+                        
+                        return {
+                            "success": True,
+                            "message": "用户注册成功",
+                            "data": {
+                                "user": {
+                                    "id": user_id,
+                                    "email": user.email,
+                                    "nickname": user.nickname,
+                                    "created_at": profile_data["created_at"]
+                                },
+                                "access_token": access_token,
+                                "token_type": "bearer"
+                            }
+                        }
+                    else:
+                        # 如果profiles表创建失败，尝试删除已创建的auth用户
+                        logger.error(f"❌ 用户资料创建失败，尝试回滚auth用户: {user.email}")
+                        try:
+                            self.supabase_service.auth.admin.delete_user(user_id)
+                            logger.info(f"✅ 已回滚auth用户: {user.email}")
+                        except Exception as rollback_error:
+                            logger.error(f"⚠️ 回滚auth用户失败: {rollback_error}")
+                        
+                        raise ValueError("用户资料创建失败，请重试")
+                        
+                except Exception as profile_error:
+                    # 如果profiles表操作失败，尝试删除已创建的auth用户
+                    logger.error(f"❌ 创建用户资料时出错: {profile_error}")
+                    try:
+                        self.supabase_service.auth.admin.delete_user(user_id)
+                        logger.info(f"✅ 已回滚auth用户: {user.email}")
+                    except Exception as rollback_error:
+                        logger.error(f"⚠️ 回滚auth用户失败: {rollback_error}")
+                    
+                    raise ValueError(f"用户资料创建失败: {profile_error}")
+                    
             elif hasattr(response, 'error'):
                 raise ValueError(f"注册失败: {response.error}")
             else:
@@ -178,6 +213,41 @@ class AuthService:
         except Exception as e:
             logger.error(f"检查邮箱失败: {e}")
             return False
+
+    async def check_duplicate_registration(self, email: str) -> dict:
+        """检查是否存在重复注册情况"""
+        try:
+            # 检查auth.users表
+            auth_users = self.supabase_service.auth.admin.list_users()
+            auth_user = None
+            for user in auth_users.users:
+                if user.email == email:
+                    auth_user = user
+                    break
+            
+            # 检查profiles表
+            profile_exists = False
+            if auth_user:
+                profile_response = self.supabase_service.table('profiles').select('id').eq('id', auth_user.id).execute()
+                profile_exists = bool(profile_response.data)
+            
+            return {
+                "email": email,
+                "auth_user_exists": bool(auth_user),
+                "profile_exists": profile_exists,
+                "user_id": auth_user.id if auth_user else None,
+                "is_duplicate": auth_user and not profile_exists  # 只有auth存在但profile不存在才是重复注册
+            }
+        except Exception as e:
+            logger.error(f"检查重复注册失败: {e}")
+            return {
+                "email": email,
+                "auth_user_exists": False,
+                "profile_exists": False,
+                "user_id": None,
+                "is_duplicate": False,
+                "error": str(e)
+            }
 
     async def get_current_user(self, token: str) -> dict:
         """获取当前用户信息"""
