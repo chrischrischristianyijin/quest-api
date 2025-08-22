@@ -1,55 +1,59 @@
-from pydantic import BaseModel
-from typing import Optional, List
+from pydantic import BaseModel, Field
+from typing import List, Optional
 from datetime import datetime
+from uuid import UUID
 
 class InsightBase(BaseModel):
-    title: str
-    description: str
-    url: Optional[str] = None
-    image_url: Optional[str] = None
-    tags: Optional[List[str]] = []
+    """Insight基础模型"""
+    title: str = Field(..., min_length=1, max_length=200, description="见解标题")
+    description: Optional[str] = Field(None, max_length=1000, description="见解描述")
+    url: Optional[str] = Field(None, max_length=500, description="相关链接")
+    image_url: Optional[str] = Field(None, max_length=500, description="图片地址")
+    thought: Optional[str] = Field(None, max_length=2000, description="用户的想法/备注")
 
 class InsightCreate(InsightBase):
-    pass
+    """创建Insight的请求模型"""
+    tag_names: Optional[List[str]] = Field(None, description="标签名称列表，会自动创建或关联现有标签")
 
 class InsightUpdate(BaseModel):
-    title: Optional[str] = None
-    description: Optional[str] = None
-    url: Optional[str] = None
-    image_url: Optional[str] = None
-    tags: Optional[List[str]] = None
+    """更新Insight的请求模型"""
+    title: Optional[str] = Field(None, min_length=1, max_length=200, description="见解标题")
+    description: Optional[str] = Field(None, max_length=1000, description="见解描述")
+    url: Optional[str] = Field(None, max_length=500, description="相关链接")
+    image_url: Optional[str] = Field(None, max_length=500, description="图片地址")
+    thought: Optional[str] = Field(None, max_length=2000, description="用户的想法/备注")
+    tag_names: Optional[List[str]] = Field(None, description="标签名称列表，会替换现有标签")
 
-class InsightResponse(BaseModel):
-    id: str
-    user_id: str
-    title: str
-    description: str
-    url: Optional[str] = None
-    image_url: Optional[str] = None
-    tags: List[str]
+class InsightResponse(InsightBase):
+    """Insight响应模型"""
+    id: UUID
+    user_id: UUID
     created_at: datetime
-    updated_at: Optional[datetime] = None
+    updated_at: datetime
+    tags: List[dict] = Field(default_factory=list, description="标签信息列表")
 
 class InsightListResponse(BaseModel):
-    success: bool
-    data: dict
+    """Insight列表响应模型"""
+    insights: List[InsightResponse]
 
-# 用户标签相关模型
+# 用户标签模型
 class UserTagBase(BaseModel):
-    name: str
-    color: str
+    """用户标签基础模型"""
+    name: str = Field(..., min_length=1, max_length=50, description="标签名称")
+    color: str = Field(..., regex=r'^#[0-9A-Fa-f]{6}$', description="标签颜色，十六进制格式")
 
 class UserTagCreate(UserTagBase):
+    """创建用户标签的请求模型"""
     pass
 
 class UserTagUpdate(BaseModel):
-    name: Optional[str] = None
-    color: Optional[str] = None
+    """更新用户标签的请求模型"""
+    name: Optional[str] = Field(None, min_length=1, max_length=50, description="标签名称")
+    color: Optional[str] = Field(None, max_length=7, description="标签颜色，十六进制格式")
 
-class UserTagResponse(BaseModel):
-    id: str
-    user_id: str
-    name: str
-    color: str
+class UserTagResponse(UserTagBase):
+    """用户标签响应模型"""
+    id: UUID
+    user_id: UUID
     created_at: datetime
-    updated_at: Optional[datetime] = None
+    updated_at: datetime

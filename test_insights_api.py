@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Quest API Insights 测试脚本
-演示见解、评论和标签API的使用
+演示见解和标签API的使用
 """
 
 import requests
@@ -86,7 +86,6 @@ def test_authenticated_apis():
     print("   - 创建见解")
     print("   - 更新见解")
     print("   - 删除见解")
-    print("   - 创建评论")
     print("   - 创建标签")
     print("   - 更新标签")
     print("   - 删除标签")
@@ -105,14 +104,6 @@ def show_api_examples():
         "description": "这是一个关于技术的见解",
         "image_url": "https://example.com/image.jpg",
         "tags": ["技术", "学习", "编程"]
-    }, indent=2, ensure_ascii=False))
-    
-    print("\n🔹 创建评论示例:")
-    print("POST /api/v1/insights/{insight_id}/comments")
-    print("Headers: Authorization: Bearer <access_token>")
-    print("Body:")
-    print(json.dumps({
-        "content": "这是一个很有用的见解！"
     }, indent=2, ensure_ascii=False))
     
     print("\n🔹 创建标签示例:")

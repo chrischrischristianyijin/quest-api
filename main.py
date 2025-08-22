@@ -29,32 +29,17 @@ async def lifespan(app: FastAPI):
 # 创建FastAPI应用
 app = FastAPI(
     title="Quest API",
-    description="一个用于收集和分享见解的平台API",
-    version="1.0.0",
-    docs_url="/api/v1/docs",
-    redoc_url="/api/v1/redoc",
-    lifespan=lifespan
+    description="Quest应用的后端API服务",
+    version="1.0.0"
 )
 
 # 中间件配置 - 修复CORS问题
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 允许所有来源，生产环境应该限制
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "PATCH"],
-    allow_headers=[
-        "Accept",
-        "Accept-Language",
-        "Content-Language",
-        "Content-Type",
-        "Authorization",
-        "X-Requested-With",
-        "Origin",
-        "Access-Control-Request-Method",
-        "Access-Control-Request-Headers"
-    ],
-    expose_headers=["*"],
-    max_age=86400,  # 预检请求缓存24小时
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 app.add_middleware(

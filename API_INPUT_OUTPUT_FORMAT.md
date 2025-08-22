@@ -1,5 +1,46 @@
 # Quest API 完整接口文档
 
+## 📋 API端点总览
+
+### **认证接口 (4个)**
+- `POST /api/v1/auth/register` - 用户注册
+- `POST /api/v1/auth/login` - 用户登录
+- `POST /api/v1/auth/logout` - 用户登出
+- `GET /api/v1/auth/google/login` - Google OAuth登录
+
+### **用户管理接口 (4个)**
+- `GET /api/v1/user/profile` - 获取用户资料
+- `PUT /api/v1/user/profile` - 更新用户资料
+- `GET /api/v1/user/following` - 获取关注列表
+- `GET /api/v1/user/followers` - 获取粉丝列表
+
+### **见解管理接口 (6个)**
+- `GET /api/v1/insights` - 获取用户见解列表（分页）
+- `GET /api/v1/insights/all` - 获取用户所有见解
+- `GET /api/v1/insights/{insight_id}` - 获取单个见解详情
+- `POST /api/v1/insights` - 创建新见解
+- `PUT /api/v1/insights/{insight_id}` - 更新见解
+- `DELETE /api/v1/insights/{insight_id}` - 删除见解
+
+### **用户标签管理接口 (5个)**
+- `GET /api/v1/user-tags` - 获取用户标签列表
+- `GET /api/v1/user-tags/{tag_id}` - 获取单个标签详情
+- `POST /api/v1/user-tags` - 创建新标签
+- `PUT /api/v1/user-tags/{tag_id}` - 更新标签
+- `DELETE /api/v1/user-tags/{tag_id}` - 删除标签
+
+### **元数据提取接口 (2个)**
+- `POST /api/v1/metadata/extract` - 提取网页元数据
+- `POST /api/v1/metadata/create-insight` - 从URL创建见解
+
+### **系统接口 (2个)**
+- `GET /` - API根路径
+- `GET /health` - 健康检查
+
+**总计：23个API端点**
+
+---
+
 ## 🔐 认证系统接口
 
 ### 用户注册
@@ -206,7 +247,7 @@ Authorization: Bearer {token}
   "url": "https://example.com/article",
   "title": "自定义标题（可选）",
   "description": "自定义描述（可选）",
-  "tags": "tag1,tag2（可选，逗号分隔）"
+  "tag_names": ["tag1", "tag2"]（可选，标签名称数组）
 }
 ```
 
@@ -313,9 +354,9 @@ Authorization: Bearer {token}
 - **title**: 标题（自动提取或用户自定义）
 - **description**: 描述（自动提取或用户自定义）
 - **image_url**: 图片地址（自动提取）
-- **tags**: 标签数组（用户自定义）
+- **tag_names**: 标签名称数组（用户自定义）
 
-## �� 见解管理接口
+##  见解管理接口
 
 ### 获取见解列表（分页）
 ```http
@@ -346,6 +387,7 @@ Authorization: Bearer {token}
         "title": "AI技术发展趋势",
         "description": "关于人工智能的最新发展...",
         "image_url": "https://example.com/image.jpg",
+        "thought": "这个领域发展很快，值得深入研究",
         "tags": ["技术", "AI"],
         "created_at": "2024-01-15T10:30:00Z",
         "updated_at": "2024-01-15T10:30:00Z"
@@ -393,6 +435,7 @@ Authorization: Bearer {token}
         "title": "AI技术发展趋势",
         "description": "关于人工智能的最新发展...",
         "image_url": "https://example.com/image.jpg",
+        "thought": "这个领域发展很快，值得深入研究",
         "tags": ["技术", "AI"],
         "created_at": "2024-01-15T10:30:00Z",
         "updated_at": "2024-01-15T10:30:00Z"
@@ -404,6 +447,7 @@ Authorization: Bearer {token}
         "title": "机器学习入门指南",
         "description": "从零开始学习机器学习...",
         "image_url": "https://example.com/image2.jpg",
+        "thought": "机器学习是AI的基础，值得学习",
         "tags": ["技术", "机器学习"],
         "created_at": "2024-01-14T10:30:00Z",
         "updated_at": "2024-01-14T10:30:00Z"
@@ -434,6 +478,7 @@ Authorization: Bearer {token}
     "title": "AI技术发展趋势",
     "description": "关于人工智能的最新发展...",
     "image_url": "https://example.com/image.jpg",
+    "thought": "这个领域发展很快，值得深入研究",
     "tags": ["技术", "AI"],
     "created_at": "2024-01-15T10:30:00Z",
     "updated_at": "2024-01-15T10:30:00Z"
@@ -452,7 +497,8 @@ Content-Type: application/json
   "description": "这是一个关于技术的见解",
   "url": "https://example.com",
   "image_url": "https://example.com/image.jpg",
-  "tags": ["技术", "编程"]
+  "thought": "这是我的一些想法和备注",
+  "tag_names": ["技术", "编程"]
 }
 ```
 
@@ -468,6 +514,7 @@ Content-Type: application/json
     "description": "这是一个关于技术的见解",
     "url": "https://example.com",
     "image_url": "https://example.com/image.jpg",
+    "thought": "这是我的一些想法和备注",
     "tags": ["技术", "编程"],
     "created_at": "2024-01-15T10:30:00Z"
   }
@@ -483,7 +530,8 @@ Content-Type: application/json
 {
   "title": "更新后的标题",
   "description": "更新后的描述",
-  "tags": ["技术", "AI", "机器学习"]
+  "thought": "更新后的想法和备注",
+  "tag_names": ["技术", "AI", "机器学习"]
 }
 ```
 
@@ -515,6 +563,8 @@ Authorization: Bearer {token}
   "message": "见解删除成功"
 }
 ```
+
+
 
 ## 🏷️ 标签管理接口
 
@@ -695,6 +745,60 @@ Authorization: Bearer {token}
   ]
 }
 ```
+
+## 🔗 标签管理说明
+
+### 新的标签管理方式
+
+**重要变化：**
+- 原来：insights表直接存储 `tags` 数组字段
+- 现在：通过 `tag_names` 字段管理标签，后端自动处理关联关系
+
+### 使用方式
+
+#### 创建/更新insight时管理标签
+```javascript
+// 创建insight时指定标签
+const response = await fetch('/api/v1/insights', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${token}`
+  },
+  body: JSON.stringify({
+    title: "AI技术发展趋势",
+    description: "关于人工智能的最新发展...",
+    url: "https://example.com/article",
+    tag_names: ["AI", "技术", "趋势"]  // 新的字段名
+  })
+});
+
+// 更新insight时修改标签
+const updateResponse = await fetch(`/api/v1/insights/${insightId}`, {
+  method: 'PUT',
+  headers: {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${token}`
+  },
+  body: JSON.stringify({
+    title: "更新后的标题",
+    tag_names: ["AI", "机器学习", "深度学习"]  // 完全替换现有标签
+  })
+});
+```
+
+### 标签自动处理
+
+**后端自动完成：**
+1. 检查标签是否存在，不存在则自动创建
+2. 管理insight和标签的多对多关联关系
+3. 确保数据一致性和权限控制
+4. 支持标签的独立管理（创建、更新、删除、搜索）
+
+**前端无需关心：**
+- 标签关联关系的底层实现
+- 标签的创建和更新逻辑
+- 数据完整性检查
 
 ## 👤 用户管理接口
 
@@ -904,7 +1008,8 @@ const insightResponse = await fetch('/api/v1/insights', {
     description: metadata.data.description,
     url: 'https://example.com/article',
     image_url: metadata.data.image_url,
-    tags: ['技术', 'AI']
+    thought: '这是我的一些想法和备注',
+    tag_names: ['技术', 'AI']  // 使用新的字段名
   })
 });
 ```
@@ -956,25 +1061,66 @@ const userInsightsResponse = await fetch('/api/v1/insights/all?user_id=550e8400-
 });
 ```
 
+
+
 ## 🎯 总结
 
 Quest API 提供完整的智能书签和知识管理功能：
 
-- **27个API端点**，覆盖用户、内容、标签等核心功能
+- **23个API端点**，覆盖用户、内容、标签等核心功能
 - **标准化响应格式**，统一的成功/错误处理
 - **完整的CRUD操作**，支持见解、标签管理
 - **智能元数据提取**，一键保存网页内容
 - **用户认证系统**，支持邮箱密码和Google OAuth
 - **用户资料管理**，支持昵称、头像、个人简介
 - **灵活的insights获取**，支持分页和一次性获取所有
-
-所有接口都遵循RESTful设计原则，支持分页、搜索、筛选等高级功能。
+- **多对多标签关联**，通过桥表管理insights和tags的关系
 
 ## 📊 数据库结构
 
-1. **`auth.users`** - Supabase认证用户表
-2. **`profiles`** - 用户扩展资料表（昵称、头像、简介、关注数）
-3. **`insights`** - 用户内容表（标题、描述、URL、图片、标签）
-4. **`user_tags`** - 用户标签表（名称、颜色、描述）
+1. **`auth.users`** - Supabase认证用户表（系统表）
+   - id (UUID) - 主键，被所有其他表外键引用
+   - email, encrypted_password, last_sign_in 等（Supabase自动管理）
 
-没有评论表和关注关系表，所有数据都通过`user_id`关联到`auth.users`。
+2. **`profiles`** - 用户资料表
+   - id (UUID) - 外键 → auth.users.id，一对一关系
+   - nickname (TEXT) - 用户昵称
+   - avatar_url (TEXT) - 用户头像链接
+   - bio (TEXT) - 个人简介
+   - created_at, updated_at (TIMESTAMP) - 时间戳
+
+3. **`insights`** - 用户内容表
+   - id (UUID) - 主键
+   - user_id (UUID) - 外键 → auth.users.id
+   - url (TEXT) - 相关网址
+   - title (TEXT) - 见解标题
+   - description (TEXT) - 描述信息
+   - image_url (TEXT) - 配图链接
+   - thought (TEXT) - 用户的想法/备注（自由文本）
+   - created_at, updated_at (TIMESTAMP) - 时间戳
+
+4. **`user_tags`** - 用户自定义标签表
+   - id (UUID) - 主键
+   - user_id (UUID) - 外键 → auth.users.id
+   - name (TEXT) - 标签名字
+   - color (TEXT) - 标签颜色（UI区分用）
+   - created_at, updated_at (TIMESTAMP) - 时间戳
+
+5. **`insight_tags`** - 多对多关系表
+   - id (UUID) - 主键
+   - insight_id (UUID) - 外键 → insights.id
+   - tag_id (UUID) - 外键 → user_tags.id
+   - user_id (UUID) - 外键 → auth.users.id（冗余存储，便于权限控制）
+   - created_at (TIMESTAMP) - 时间戳
+
+**数据关联关系：**
+- auth.users ↔ profiles (一对一)
+- auth.users ↔ insights (一对多)
+- auth.users ↔ user_tags (一对多)
+- insights ↔ insight_tags ↔ user_tags (多对多)
+
+**权限控制：**
+- 所有业务表都通过user_id关联到auth.users
+- 用户只能访问和操作自己的数据
+- 支持级联删除（删除insight时自动删除相关标签关联）
+

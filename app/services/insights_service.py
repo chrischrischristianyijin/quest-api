@@ -1,81 +1,89 @@
-from app.core.database import get_supabase_client
+from typing import List, Optional, Dict, Any
+from uuid import UUID
+from app.core.database import get_supabase
 from app.models.insight import InsightCreate, InsightUpdate, InsightResponse, InsightListResponse
-from typing import Dict, Any, List, Optional
+from app.services.insight_tag_service import InsightTagService
 import logging
-from datetime import datetime
-import uuid
 
 logger = logging.getLogger(__name__)
 
 class InsightsService:
-    def __init__(self):
-        self.supabase = get_supabase_client()
+    """Insights服务类"""
     
+    @staticmethod
     async def get_insights(
-        self,
+        user_id: UUID,
         page: int = 1,
         limit: int = 10,
-        user_id: Optional[str] = None,
-        search: Optional[str] = None
-    ) -> InsightListResponse:
-        """获取见解列表"""
+        search: Optional[str] = None,
+        target_user_id: Optional[UUID] = None
+    ) -> Dict[str, Any]:
+        """获取insights列表（分页）"""
         try:
+            supabase = get_supabase()
+            
+            # 确定要查询的用户ID
+            query_user_id = str(target_user_id) if target_user_id else str(user_id)
+            
+            # 权限检查：只能查看自己的insights
+            if str(target_user_id) != str(user_id):
+                return {
+                    "success": False,
+                    "message": "只能查看自己的insights"
+                }
+            
             # 构建查询
-            query = self.supabase.table("insights").select("*")
+            query = supabase.table('insights').select('*').eq('user_id', query_user_id)
             
-            # 用户筛选
-            if user_id:
-                query = query.eq("user_id", user_id)
-            
-            # 搜索功能
+            # 添加搜索条件
             if search:
-                query = query.or_(f"title.ilike.%{search}%,description.ilike.%{search}%")
+                query = query.or_(f'title.ilike.%{search}%,description.ilike.%{search}%')
             
-            # 分页
-            offset = (page - 1) * limit
-            query = query.range(offset, offset + limit - 1)
-            
-            # 按创建时间倒序
-            query = query.order("created_at", desc=True)
+            # 添加排序和分页
+            query = query.order('created_at', desc=True).range((page - 1) * limit, page * limit - 1)
             
             # 执行查询
             response = query.execute()
             
-            # 检查响应状态
             if hasattr(response, 'error') and response.error:
-                logger.error(f"查询insights失败: {response.error}")
-                raise Exception(f"数据库查询失败: {response.error}")
+                logger.error(f"获取insights失败: {response.error}")
+                return {"success": False, "message": "获取insights失败"}
             
             insights = response.data or []
             
             # 获取总数
-            count_query = self.supabase.table("insights").select("id", count="exact")
-            if user_id:
-                count_query = count_query.eq("user_id", user_id)
+            count_query = supabase.table('insights').select('id', count='exact').eq('user_id', query_user_id)
             if search:
-                count_query = count_query.or_(f"title.ilike.%{search}%,description.ilike.%{search}%")
+                count_query = count_query.or_(f'title.ilike.%{search}%,description.ilike.%{search}%')
             
             count_response = count_query.execute()
-            total = count_response.count if hasattr(count_response, 'count') and count_response.count is not None else 0
+            total = count_response.count if hasattr(count_response, 'count') else len(insights)
             
-            # 构建响应
+            # 批量获取标签
+            insight_ids = [UUID(insight['id']) for insight in insights]
+            tags_result = await InsightTagService.get_tags_by_insight_ids(insight_ids, user_id)
+            
+            # 构建响应数据
             insight_responses = []
             for insight in insights:
-                insight_responses.append(InsightResponse(
-                    id=insight["id"],
-                    user_id=insight["user_id"],
-                    url=insight.get("url"),
-                    title=insight["title"],
-                    description=insight["description"],
-                    image_url=insight.get("image_url"),
-                    tags=insight.get("tags", []),
-                    created_at=insight["created_at"],
-                    updated_at=insight.get("updated_at")
-                ))
+                insight_tags = tags_result.get('data', {}).get(insight['id'], [])
+                
+                insight_response = InsightResponse(
+                    id=UUID(insight['id']),
+                    user_id=UUID(insight['user_id']),
+                    title=insight['title'],
+                    description=insight['description'],
+                    url=insight.get('url'),
+                    image_url=insight.get('image_url'),
+                    created_at=insight['created_at'],
+                    updated_at=insight['updated_at'],
+                    tags=insight_tags
+                )
+                insight_responses.append(insight_response)
             
-            return InsightListResponse(
-                success=True,
-                data={
+            return {
+                "success": True,
+                "data": {
                     "insights": insight_responses,
                     "pagination": {
                         "page": page,
@@ -84,235 +92,253 @@ class InsightsService:
                         "total_pages": (total + limit - 1) // limit
                     }
                 }
-            )
+            }
             
         except Exception as e:
-            logger.error(f"获取insights失败: {e}")
-            raise Exception(f"获取insights失败: {str(e)}")
+            logger.error(f"获取insights失败: {str(e)}")
+            return {"success": False, "message": f"获取insights失败: {str(e)}"}
     
+    @staticmethod
     async def get_all_user_insights(
-        self,
-        user_id: Optional[str] = None,
-        search: Optional[str] = None
-    ) -> InsightListResponse:
-        """获取用户所有见解（不分页）"""
+        user_id: UUID,
+        search: Optional[str] = None,
+        target_user_id: Optional[UUID] = None
+    ) -> Dict[str, Any]:
+        """获取用户所有insights（不分页）"""
         try:
+            supabase = get_supabase()
+            
+            # 确定要查询的用户ID
+            query_user_id = str(target_user_id) if target_user_id else str(user_id)
+            
+            # 权限检查：只能查看自己的insights
+            if str(target_user_id) != str(user_id):
+                return {
+                    "success": False,
+                    "message": "只能查看自己的insights"
+                }
+            
             # 构建查询
-            query = self.supabase.table("insights").select("*")
+            query = supabase.table('insights').select('*').eq('user_id', query_user_id)
             
-            # 用户筛选
-            if user_id:
-                query = query.eq("user_id", user_id)
-            
-            # 搜索功能
+            # 添加搜索条件
             if search:
-                query = query.or_(f"title.ilike.%{search}%,description.ilike.%{search}%")
+                query = query.or_(f'title.ilike.%{search}%,description.ilike.%{search}%')
             
-            # 按创建时间倒序
-            query = query.order("created_at", desc=True)
+            # 添加排序
+            query = query.order('created_at', desc=True)
             
-            # 执行查询（不分页）
+            # 执行查询
             response = query.execute()
             
-            # 检查响应状态
             if hasattr(response, 'error') and response.error:
-                logger.error(f"查询所有insights失败: {response.error}")
-                raise Exception(f"数据库查询失败: {response.error}")
+                logger.error(f"获取所有insights失败: {response.error}")
+                return {"success": False, "message": "获取所有insights失败"}
             
             insights = response.data or []
             
-            # 构建响应
+            # 批量获取标签
+            insight_ids = [UUID(insight['id']) for insight in insights]
+            tags_result = await InsightTagService.get_tags_by_insight_ids(insight_ids, user_id)
+            
+            # 构建响应数据
             insight_responses = []
             for insight in insights:
-                insight_responses.append(InsightResponse(
-                    id=insight["id"],
-                    user_id=insight["user_id"],
-                    url=insight.get("url"),
-                    title=insight["title"],
-                    description=insight["description"],
-                    image_url=insight.get("image_url"),
-                    tags=insight.get("tags", []),
-                    created_at=insight["created_at"],
-                    updated_at=insight.get("updated_at")
-                ))
-            
-            return InsightListResponse(
-                success=True,
-                data={
-                    "insights": insight_responses
-                }
-            )
-            
-        except Exception as e:
-            logger.error(f"获取所有insights失败: {e}")
-            raise Exception(f"获取所有insights失败: {str(e)}")
-    
-    async def get_insight(self, insight_id: str) -> InsightResponse:
-        """获取见解详情"""
-        try:
-            response = self.supabase.table("insights").select("*").eq("id", insight_id).execute()
-            
-            if hasattr(response, 'error') and response.error:
-                logger.error(f"查询insight失败: {response.error}")
-                raise Exception(f"数据库查询失败: {response.error}")
-            
-            if not response.data:
-                raise Exception("Insight不存在")
-            
-            insight = response.data[0]
-            
-            return InsightResponse(
-                id=insight["id"],
-                user_id=insight["user_id"],
-                url=insight.get("url"),
-                title=insight["title"],
-                description=insight["description"],
-                image_url=insight.get("image_url"),
-                tags=insight.get("tags", []),
-                created_at=insight["created_at"],
-                updated_at=insight.get("updated_at")
-            )
-            
-        except Exception as e:
-            logger.error(f"获取insight失败: {e}")
-            raise Exception(f"获取insight失败: {str(e)}")
-    
-    async def create_insight(self, insight: InsightCreate, user_id: str) -> InsightResponse:
-        """创建新见解"""
-        try:
-            # 生成UUID
-            insight_id = str(uuid.uuid4())
-            current_time = datetime.utcnow().isoformat()
-            
-            # 准备数据
-            insight_data = {
-                "id": insight_id,
-                "user_id": user_id,
-                "url": insight.url,
-                "title": insight.title,
-                "description": insight.description,
-                "image_url": insight.image_url,
-                "tags": insight.tags or [],
-                "created_at": current_time,
-                "updated_at": current_time
-            }
-            
-            # 插入数据库
-            response = self.supabase.table("insights").insert(insight_data).execute()
-            
-            if hasattr(response, 'error') and response.error:
-                logger.error(f"创建insight失败: {response.error}")
-                raise Exception(f"数据库插入失败: {response.error}")
-            
-            logger.info(f"成功创建insight: {insight_id}")
-            
-            # 返回创建的insight
-            return InsightResponse(
-                id=insight_id,
-                user_id=user_id,
-                url=insight.url,
-                title=insight.title,
-                description=insight.description,
-                image_url=insight.image_url,
-                tags=insight.tags or [],
-                created_at=current_time,
-                updated_at=current_time
-            )
-            
-        except Exception as e:
-            logger.error(f"创建insight失败: {e}")
-            raise Exception(f"创建insight失败: {str(e)}")
-    
-    async def update_insight(
-        self,
-        insight_id: str,
-        insight: InsightUpdate,
-        user_id: str
-    ) -> InsightResponse:
-        """更新见解"""
-        try:
-            # 检查insight是否存在且属于当前用户
-            existing_response = self.supabase.table("insights").select("*").eq("id", insight_id).eq("user_id", user_id).execute()
-            
-            if hasattr(existing_response, 'error') and existing_response.error:
-                logger.error(f"查询insight失败: {existing_response.error}")
-                raise Exception(f"数据库查询失败: {existing_response.error}")
-            
-            if not existing_response.data:
-                raise Exception("Insight不存在或无权限修改")
-            
-            existing_insight = existing_response.data[0]
-            current_time = datetime.utcnow().isoformat()
-            
-            # 准备更新数据
-            update_data = {
-                "updated_at": current_time
-            }
-            
-            if insight.title is not None:
-                update_data["title"] = insight.title
-            if insight.description is not None:
-                update_data["description"] = insight.description
-            if insight.url is not None:
-                update_data["url"] = insight.url
-            if insight.image_url is not None:
-                update_data["image_url"] = insight.image_url
-            if insight.tags is not None:
-                update_data["tags"] = insight.tags
-            
-            # 更新数据库
-            response = self.supabase.table("insights").update(update_data).eq("id", insight_id).execute()
-            
-            if hasattr(response, 'error') and response.error:
-                logger.error(f"更新insight失败: {response.error}")
-                raise Exception(f"数据库更新失败: {response.error}")
-            
-            logger.info(f"成功更新insight: {insight_id}")
-            
-            # 返回更新后的insight
-            return InsightResponse(
-                id=insight_id,
-                user_id=user_id,
-                url=update_data.get("url", existing_insight.get("url")),
-                title=update_data.get("title", existing_insight["title"]),
-                description=update_data.get("description", existing_insight["description"]),
-                image_url=update_data.get("image_url", existing_insight.get("image_url")),
-                tags=update_data.get("tags", existing_insight.get("tags", [])),
-                created_at=existing_insight["created_at"],
-                updated_at=current_time
-            )
-            
-        except Exception as e:
-            logger.error(f"更新insight失败: {e}")
-            raise Exception(f"更新insight失败: {str(e)}")
-    
-    async def delete_insight(self, insight_id: str, user_id: str) -> Dict[str, Any]:
-        """删除见解"""
-        try:
-            # 检查insight是否存在且属于当前用户
-            existing_response = self.supabase.table("insights").select("id").eq("id", insight_id).eq("user_id", user_id).execute()
-            
-            if hasattr(existing_response, 'error') and existing_response.error:
-                logger.error(f"查询insight失败: {existing_response.error}")
-                raise Exception(f"数据库查询失败: {existing_response.error}")
-            
-            if not existing_response.data:
-                raise Exception("Insight不存在或无权限删除")
-            
-            # 删除insight
-            response = self.supabase.table("insights").delete().eq("id", insight_id).execute()
-            
-            if hasattr(response, 'error') and response.error:
-                logger.error(f"删除insight失败: {response.error}")
-                raise Exception(f"数据库删除失败: {response.error}")
-            
-            logger.info(f"成功删除insight: {insight_id}")
+                insight_tags = tags_result.get('data', {}).get(insight['id'], [])
+                
+                insight_response = InsightResponse(
+                    id=UUID(insight['id']),
+                    user_id=UUID(insight['user_id']),
+                    title=insight['title'],
+                    description=insight['description'],
+                    url=insight.get('url'),
+                    image_url=insight.get('image_url'),
+                    created_at=insight['created_at'],
+                    updated_at=insight['updated_at'],
+                    tags=insight_tags
+                )
+                insight_responses.append(insight_response)
             
             return {
                 "success": True,
-                "message": "见解删除成功"
+                "data": {
+                    "insights": insight_responses
+                }
             }
             
         except Exception as e:
-            logger.error(f"删除insight失败: {e}")
-            raise Exception(f"删除insight失败: {str(e)}")
+            logger.error(f"获取所有insights失败: {str(e)}")
+            return {"success": False, "message": f"获取所有insights失败: {str(e)}"}
+    
+    @staticmethod
+    async def get_insight(insight_id: UUID, user_id: UUID) -> Dict[str, Any]:
+        """获取单个insight详情"""
+        try:
+            supabase = get_supabase()
+            
+            # 获取insight
+            response = supabase.table('insights').select('*').eq('id', str(insight_id)).execute()
+            
+            if hasattr(response, 'error') and response.error:
+                logger.error(f"获取insight失败: {response.error}")
+                return {"success": False, "message": "获取insight失败"}
+            
+            if not response.data:
+                return {"success": False, "message": "Insight不存在"}
+            
+            insight = response.data[0]
+            
+            # 权限检查：只能查看自己的insight
+            if insight['user_id'] != str(user_id):
+                return {"success": False, "message": "无权查看此insight"}
+            
+            # 获取标签
+            tags_result = await InsightTagService.get_insight_tags(insight_id, user_id)
+            insight_tags = tags_result.get('data', []) if tags_result.get('success') else []
+            
+            # 构建响应数据
+            insight_response = InsightResponse(
+                id=UUID(insight['id']),
+                user_id=UUID(insight['user_id']),
+                title=insight['title'],
+                description=insight['description'],
+                url=insight.get('url'),
+                image_url=insight.get('image_url'),
+                created_at=insight['created_at'],
+                updated_at=insight['updated_at'],
+                tags=insight_tags
+            )
+            
+            return {"success": True, "data": insight_response}
+            
+        except Exception as e:
+            logger.error(f"获取insight失败: {str(e)}")
+            return {"success": False, "message": f"获取insight失败: {str(e)}"}
+    
+    @staticmethod
+    async def create_insight(insight_data: InsightCreate, user_id: UUID) -> Dict[str, Any]:
+        """创建新insight"""
+        try:
+            supabase = get_supabase()
+            
+            # 准备insight数据（不包含tags）
+            insight_insert_data = {
+                'title': insight_data.title,
+                'description': insight_data.description,
+                'url': insight_data.url,
+                'image_url': insight_data.image_url,
+                'user_id': str(user_id)
+            }
+            
+            # 创建insight
+            response = supabase.table('insights').insert(insight_insert_data).execute()
+            
+            if hasattr(response, 'error') and response.error:
+                logger.error(f"创建insight失败: {response.error}")
+                return {"success": False, "message": "创建insight失败"}
+            
+            if not response.data:
+                return {"success": False, "message": "创建insight失败"}
+            
+            insight = response.data[0]
+            insight_id = UUID(insight['id'])
+            
+            # 处理标签
+            if insight_data.tag_names:
+                tags_result = await InsightTagService.update_insight_tags(
+                    insight_id, insight_data.tag_names, user_id
+                )
+                if not tags_result.get('success'):
+                    logger.warning(f"创建insight成功，但标签处理失败: {tags_result.get('message')}")
+            
+            # 获取完整的insight数据（包含标签）
+            return await InsightsService.get_insight(insight_id, user_id)
+            
+        except Exception as e:
+            logger.error(f"创建insight失败: {str(e)}")
+            return {"success": False, "message": f"创建insight失败: {str(e)}"}
+    
+    @staticmethod
+    async def update_insight(insight_id: UUID, insight_data: InsightUpdate, user_id: UUID) -> Dict[str, Any]:
+        """更新insight"""
+        try:
+            supabase = get_supabase()
+            
+            # 检查insight是否存在且属于该用户
+            existing_response = supabase.table('insights').select('user_id').eq('id', str(insight_id)).execute()
+            
+            if hasattr(existing_response, 'error') and existing_response.error:
+                logger.error(f"检查insight失败: {existing_response.error}")
+                return {"success": False, "message": "检查insight失败"}
+            
+            if not existing_response.data:
+                return {"success": False, "message": "Insight不存在"}
+            
+            if existing_response.data[0]['user_id'] != str(user_id):
+                return {"success": False, "message": "无权更新此insight"}
+            
+            # 准备更新数据（不包含tags）
+            update_data = {}
+            if insight_data.title is not None:
+                update_data['title'] = insight_data.title
+            if insight_data.description is not None:
+                update_data['description'] = insight_data.description
+            if insight_data.url is not None:
+                update_data['url'] = insight_data.url
+            if insight_data.image_url is not None:
+                update_data['image_url'] = insight_data.image_url
+            
+            # 更新insight
+            if update_data:
+                response = supabase.table('insights').update(update_data).eq('id', str(insight_id)).execute()
+                
+                if hasattr(response, 'error') and response.error:
+                    logger.error(f"更新insight失败: {response.error}")
+                    return {"success": False, "message": "更新insight失败"}
+            
+            # 处理标签更新
+            if insight_data.tag_names is not None:
+                tags_result = await InsightTagService.update_insight_tags(
+                    insight_id, insight_data.tag_names, user_id
+                )
+                if not tags_result.get('success'):
+                    logger.warning(f"更新insight成功，但标签处理失败: {tags_result.get('message')}")
+            
+            # 获取更新后的insight数据
+            return await InsightsService.get_insight(insight_id, user_id)
+            
+        except Exception as e:
+            logger.error(f"更新insight失败: {str(e)}")
+            return {"success": False, "message": f"更新insight失败: {str(e)}"}
+    
+    @staticmethod
+    async def delete_insight(insight_id: UUID, user_id: UUID) -> Dict[str, Any]:
+        """删除insight"""
+        try:
+            supabase = get_supabase()
+            
+            # 检查insight是否存在且属于该用户
+            existing_response = supabase.table('insights').select('user_id').eq('id', str(insight_id)).execute()
+            
+            if hasattr(existing_response, 'error') and existing_response.error:
+                logger.error(f"检查insight失败: {existing_response.error}")
+                return {"success": False, "message": "检查insight失败"}
+            
+            if not existing_response.data:
+                return {"success": False, "message": "Insight不存在"}
+            
+            if existing_response.data[0]['user_id'] != str(user_id):
+                return {"success": False, "message": "无权删除此insight"}
+            
+            # 删除insight（标签关联会通过CASCADE自动删除）
+            response = supabase.table('insights').delete().eq('id', str(insight_id)).execute()
+            
+            if hasattr(response, 'error') and response.error:
+                logger.error(f"删除insight失败: {response.error}")
+                return {"success": False, "message": "删除insight失败"}
+            
+            return {"success": True, "message": "Insight删除成功"}
+            
+        except Exception as e:
+            logger.error(f"删除insight失败: {str(e)}")
+            return {"success": False, "message": f"删除insight失败: {str(e)}"}

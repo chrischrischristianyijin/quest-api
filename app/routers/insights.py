@@ -4,17 +4,18 @@ from app.services.insights_service import InsightsService
 from app.services.auth_service import AuthService
 from app.models.insight import InsightCreate, InsightUpdate, InsightResponse, InsightListResponse
 from typing import Dict, Any, List, Optional
+from uuid import UUID
 import logging
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["见解管理"])
 security = HTTPBearer()
 
-@router.get("/", response_model=InsightListResponse)
+@router.get("/")
 async def get_insights(
     page: int = Query(1, ge=1, description="页码"),
     limit: int = Query(10, ge=1, le=100, description="每页数量"),
-    user_id: Optional[str] = Query(None, description="用户ID筛选"),
+    user_id: Optional[UUID] = Query(None, description="用户ID筛选"),
     search: Optional[str] = Query(None, description="搜索关键词"),
     credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
@@ -25,20 +26,27 @@ async def get_insights(
         
         insights_service = InsightsService()
         result = await insights_service.get_insights(
+            user_id=UUID(current_user["id"]),
             page=page,
             limit=limit,
-            user_id=user_id or current_user["id"],
-            search=search
+            search=search,
+            target_user_id=user_id
         )
+        
+        if not result.get("success"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=result.get("message", "获取insights失败")
+            )
         
         return result
     except Exception as e:
         logger.error(f"获取见解列表失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/all", response_model=InsightListResponse)
+@router.get("/all")
 async def get_all_user_insights(
-    user_id: Optional[str] = Query(None, description="用户ID筛选"),
+    user_id: Optional[UUID] = Query(None, description="用户ID筛选"),
     search: Optional[str] = Query(None, description="搜索关键词"),
     credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
@@ -49,18 +57,25 @@ async def get_all_user_insights(
         
         insights_service = InsightsService()
         result = await insights_service.get_all_user_insights(
-            user_id=user_id or current_user["id"],
-            search=search
+            user_id=UUID(current_user["id"]),
+            search=search,
+            target_user_id=user_id
         )
+        
+        if not result.get("success"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=result.get("message", "获取所有insights失败")
+            )
         
         return result
     except Exception as e:
         logger.error(f"获取用户所有见解失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/{insight_id}", response_model=InsightResponse)
+@router.get("/{insight_id}")
 async def get_insight(
-    insight_id: str,
+    insight_id: UUID,
     credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
     """获取见解详情"""
@@ -69,13 +84,12 @@ async def get_insight(
         current_user = await auth_service.get_current_user(credentials.credentials)
         
         insights_service = InsightsService()
-        result = await insights_service.get_insight(insight_id)
+        result = await insights_service.get_insight(insight_id, UUID(current_user["id"]))
         
-        # 安全检查：确保用户只能访问自己的insights
-        if result.data["user_id"] != current_user["id"]:
+        if not result.get("success"):
             raise HTTPException(
-                status_code=403, 
-                detail="无权限访问此insight"
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=result.get("message", "获取insight失败")
             )
         
         return result
@@ -83,7 +97,7 @@ async def get_insight(
         logger.error(f"获取见解详情失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/", response_model=InsightResponse)
+@router.post("/")
 async def create_insight(
     insight: InsightCreate,
     credentials: HTTPAuthorizationCredentials = Depends(security)
@@ -94,16 +108,22 @@ async def create_insight(
         current_user = await auth_service.get_current_user(credentials.credentials)
         
         insights_service = InsightsService()
-        result = await insights_service.create_insight(insight, current_user["id"])
+        result = await insights_service.create_insight(insight, UUID(current_user["id"]))
+        
+        if not result.get("success"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=result.get("message", "创建insight失败")
+            )
         
         return result
     except Exception as e:
         logger.error(f"创建见解失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.put("/{insight_id}", response_model=InsightResponse)
+@router.put("/{insight_id}")
 async def update_insight(
-    insight_id: str,
+    insight_id: UUID,
     insight: InsightUpdate,
     credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
@@ -113,7 +133,13 @@ async def update_insight(
         current_user = await auth_service.get_current_user(credentials.credentials)
         
         insights_service = InsightsService()
-        result = await insights_service.update_insight(insight_id, insight, current_user["id"])
+        result = await insights_service.update_insight(insight_id, insight, UUID(current_user["id"]))
+        
+        if not result.get("success"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=result.get("message", "更新insight失败")
+            )
         
         return result
     except Exception as e:
@@ -122,7 +148,7 @@ async def update_insight(
 
 @router.delete("/{insight_id}")
 async def delete_insight(
-    insight_id: str,
+    insight_id: UUID,
     credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
     """删除见解"""
@@ -131,7 +157,13 @@ async def delete_insight(
         current_user = await auth_service.get_current_user(credentials.credentials)
         
         insights_service = InsightsService()
-        result = await insights_service.delete_insight(insight_id, current_user["id"])
+        result = await insights_service.delete_insight(insight_id, UUID(current_user["id"]))
+        
+        if not result.get("success"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=result.get("message", "删除insight失败")
+            )
         
         return result
     except Exception as e:
