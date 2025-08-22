@@ -40,7 +40,7 @@ class InsightListResponse(BaseModel):
 class UserTagBase(BaseModel):
     """用户标签基础模型"""
     name: str = Field(..., min_length=1, max_length=50, description="标签名称")
-    color: str = Field(..., regex=r'^#[0-9A-Fa-f]{6}$', description="标签颜色，十六进制格式")
+    color: str = Field(..., pattern=r'^#[0-9A-Fa-f]{6}$', description="标签颜色，十六进制格式")
 
 class UserTagCreate(UserTagBase):
     """创建用户标签的请求模型"""
