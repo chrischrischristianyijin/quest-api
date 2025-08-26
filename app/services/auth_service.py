@@ -94,9 +94,9 @@ class AuthService:
                 user_id = response.user.id
                 
                 try:
-                    # 创建用户资料
+                    # 创建用户资料 - 使用正确的字段映射
                     profile_data = {
-                        "id": user_id,
+                        "id": user_id,  # 使用Supabase Auth生成的用户ID作为主键
                         "nickname": user.nickname,
                         "created_at": datetime.utcnow().isoformat(),
                         "updated_at": datetime.utcnow().isoformat()
@@ -192,8 +192,10 @@ class AuthService:
         """检查邮箱是否已存在"""
         try:
             response = self.supabase_service.auth.admin.list_users()
-            for user in response.users:
-                if user.email == email:
+            # 修复：response.users 应该是 response.data
+            users = response.data if hasattr(response, 'data') else []
+            for user in users:
+                if user.get('email') == email:
                     return True
             return False
         except Exception as e:
