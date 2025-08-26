@@ -5,7 +5,7 @@ import logging
 import uuid
 import os
 from datetime import datetime
-from supabase.lib.client_exceptions import SupabaseException
+from supabase import SupabaseException
 
 # 配置详细日志
 logging.basicConfig(
