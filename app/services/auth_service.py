@@ -124,16 +124,14 @@ class AuthService:
             # 生成唯一用户名
             username = self._generate_unique_username(user.email)
             
-            # 使用Supabase Auth注册用户
-            auth_response = self.supabase.auth.sign_up({
+            # 使用 Service Role 以管理员方式创建用户，避免邮件确认/网关导致的 500
+            auth_response = self.supabase_service.auth.admin.create_user({
                 "email": user.email,
                 "password": user.password,
-                "options": {
-                    "data": {
-                        "username": username,
-                        "nickname": user.nickname,
-                        # 可以添加其他元数据
-                    }
+                "email_confirm": True,
+                "user_metadata": {
+                    "username": username,
+                    "nickname": user.nickname
                 }
             })
             
