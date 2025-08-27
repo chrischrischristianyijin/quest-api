@@ -187,53 +187,78 @@ class AuthService:
             self.logger.info(f"✅ Supabase Auth用户创建成功: {user_id}")
             
             try:
-                # 创建用户资料 - 使用正确的字段映射
-                profile_data = {
-                    "id": user_id,  # 使用Supabase Auth生成的用户ID作为主键
-                    "username": username,
-                    "nickname": user.nickname,
-                    "email": user.email,
-                    "created_at": datetime.utcnow().isoformat(),
-                    "updated_at": datetime.utcnow().isoformat()
-                }
-                
-                profile_response = self.supabase_service.table('profiles').insert(profile_data).execute()
-                
-                if profile_response.data:
-                    self.logger.info(f"✅ 用户资料创建成功: {user.email}")
-                    
-                    # 为新用户添加默认标签
-                    await self.add_default_tags_for_user(user_id)
-                    
-                    # 获取访问令牌
-                    access_token = None
-                    if hasattr(auth_response, 'session') and auth_response.session:
-                        access_token = auth_response.session.access_token
-                    
-                    result_data = {
-                        "user": {
-                            "id": user_id,
-                            "email": user.email,
-                            "username": username,
-                            "nickname": user.nickname,
-                            "created_at": profile_data["created_at"]
-                        },
-                        "access_token": access_token,
-                        "token_type": "bearer"
+                # 优先检查是否已有资料（避免与触发器重复插入）
+                profile_exists = False
+                try:
+                    existing_profile = (
+                        self.supabase_service
+                        .table('profiles')
+                        .select('id')
+                        .eq('id', user_id)
+                        .execute()
+                    )
+                    profile_exists = bool(existing_profile.data)
+                except Exception as check_err:
+                    self.logger.warning(f"检查现有资料失败，继续尝试创建: {check_err}")
+                    profile_exists = False
+
+                created_at_iso = datetime.utcnow().isoformat()
+
+                if not profile_exists:
+                    # 创建用户资料 - 使用正确的字段映射
+                    profile_data = {
+                        "id": user_id,  # 使用Supabase Auth生成的用户ID作为主键
+                        "username": username,
+                        "nickname": user.nickname,
+                        "email": user.email,
+                        "created_at": created_at_iso,
+                        "updated_at": created_at_iso
                     }
-                    
-                    self.logger.info(f"🎉 用户注册完成: {user.email}")
-                    return {
-                        "success": True,
-                        "message": "用户注册成功",
-                        "data": result_data
-                    }
+
+                    profile_response = (
+                        self.supabase_service
+                        .table('profiles')
+                        .insert(profile_data)
+                        .execute()
+                    )
+
+                    if not profile_response.data:
+                        # 如果profiles表创建失败，尝试删除已创建的auth用户
+                        self.logger.error(f"❌ 用户资料创建失败，尝试回滚auth用户: {user.email}")
+                        await self._rollback_auth_user(user_id)
+                        raise ValueError("用户资料创建失败，请重试")
+                    else:
+                        self.logger.info(f"✅ 用户资料创建成功: {user.email}")
                 else:
-                    # 如果profiles表创建失败，尝试删除已创建的auth用户
-                    self.logger.error(f"❌ 用户资料创建失败，尝试回滚auth用户: {user.email}")
-                    await self._rollback_auth_user(user_id)
-                    raise ValueError("用户资料创建失败，请重试")
-                    
+                    self.logger.info(f"ℹ️ 资料已存在，跳过创建: {user.email}")
+
+                # 为新用户添加默认标签（若已存在则跳过）
+                await self.add_default_tags_for_user(user_id)
+
+                # 获取访问令牌
+                access_token = None
+                if hasattr(auth_response, 'session') and auth_response.session:
+                    access_token = auth_response.session.access_token
+
+                result_data = {
+                    "user": {
+                        "id": user_id,
+                        "email": user.email,
+                        "username": username,
+                        "nickname": user.nickname,
+                        "created_at": created_at_iso
+                    },
+                    "access_token": access_token,
+                    "token_type": "bearer"
+                }
+
+                self.logger.info(f"🎉 用户注册完成: {user.email}")
+                return {
+                    "success": True,
+                    "message": "用户注册成功",
+                    "data": result_data
+                }
+
             except Exception as profile_error:
                 # 如果profiles表操作失败，尝试删除已创建的auth用户
                 self.logger.error(f"❌ 创建用户资料时出错: {profile_error}")
