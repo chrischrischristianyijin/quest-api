@@ -76,18 +76,40 @@ class AuthService:
         """检查邮箱是否已存在"""
         try:
             # 检查 auth.users 表
-            auth_response = self.supabase_service.auth.admin.list_users()
-            existing_emails = [user.email for user in auth_response.users if user.email == email]
-            
-            if existing_emails:
-                self.logger.info(f"邮箱已存在于auth.users: {email}")
-                return True
+            try:
+                auth_response = self.supabase_service.auth.admin.list_users()
+                # 根据Supabase版本，返回值可能是列表或包含users属性的对象
+                if hasattr(auth_response, 'users'):
+                    # 新版本返回对象
+                    users = auth_response.users
+                elif isinstance(auth_response, list):
+                    # 旧版本直接返回列表
+                    users = auth_response
+                else:
+                    # 其他情况，尝试获取data属性
+                    users = getattr(auth_response, 'data', [])
+                
+                # 检查邮箱是否已存在
+                for user in users:
+                    if hasattr(user, 'email') and user.email == email:
+                        self.logger.info(f"邮箱已存在于auth.users: {email}")
+                        return True
+                    elif isinstance(user, dict) and user.get('email') == email:
+                        self.logger.info(f"邮箱已存在于auth.users: {email}")
+                        return True
+                
+            except Exception as auth_error:
+                self.logger.warning(f"检查auth.users失败，跳过: {auth_error}")
+                # 如果auth检查失败，继续检查profiles表
             
             # 检查 profiles 表
-            profile_response = self.supabase_service.table('profiles').select('email').eq('email', email).execute()
-            if profile_response.data:
-                self.logger.info(f"邮箱已存在于profiles: {email}")
-                return True
+            try:
+                profile_response = self.supabase_service.table('profiles').select('email').eq('email', email).execute()
+                if profile_response.data:
+                    self.logger.info(f"邮箱已存在于profiles: {email}")
+                    return True
+            except Exception as profile_error:
+                self.logger.warning(f"检查profiles表失败: {profile_error}")
                 
             return False
             
