@@ -73,49 +73,10 @@ class AuthService:
             return f"user_{str(uuid.uuid4())[:12]}"
 
     async def check_email_exists(self, email: str) -> bool:
-        """检查邮箱是否已存在"""
+        """检查邮箱是否已存在（仅由 Supabase 自行校验，方法保持兼容但恒返回 False）"""
         try:
-            # 检查 auth.users 表
-            try:
-                auth_response = self.supabase_service.auth.admin.list_users()
-                # 根据Supabase版本，返回值可能是列表或包含users属性的对象
-                if hasattr(auth_response, 'users'):
-                    # 新版本返回对象
-                    users = auth_response.users
-                elif isinstance(auth_response, list):
-                    # 旧版本直接返回列表
-                    users = auth_response
-                else:
-                    # 其他情况，尝试获取data属性
-                    users = getattr(auth_response, 'data', [])
-                
-                # 检查邮箱是否已存在
-                for user in users:
-                    if hasattr(user, 'email') and user.email == email:
-                        self.logger.info(f"邮箱已存在于auth.users: {email}")
-                        return True
-                    elif isinstance(user, dict) and user.get('email') == email:
-                        self.logger.info(f"邮箱已存在于auth.users: {email}")
-                        return True
-                
-            except Exception as auth_error:
-                self.logger.warning(f"检查auth.users失败，跳过: {auth_error}")
-                # 如果auth检查失败，继续检查profiles表
-            
-            # 检查 profiles 表
-            try:
-                profile_response = self.supabase_service.table('profiles').select('email').eq('email', email).execute()
-                if profile_response.data:
-                    self.logger.info(f"邮箱已存在于profiles: {email}")
-                    return True
-            except Exception as profile_error:
-                self.logger.warning(f"检查profiles表失败: {profile_error}")
-                
             return False
-            
-        except Exception as e:
-            self.logger.error(f"检查邮箱存在性时出错: {e}")
-            # 如果检查失败，假设邮箱不存在，让注册流程继续
+        except Exception:
             return False
 
     async def add_default_tags_for_user(self, user_id: str):
@@ -158,9 +119,7 @@ class AuthService:
         try:
             self.logger.info(f"开始注册用户: {user.email}")
             
-            # 检查邮箱是否已存在
-            if await self.check_email_exists(user.email):
-                raise ValueError("邮箱已被注册")
+            # 不再在注册前检查邮箱是否存在，交由 Supabase Auth 自行校验
             
             # 生成唯一用户名
             username = self._generate_unique_username(user.email)
@@ -210,7 +169,6 @@ class AuthService:
                         "id": user_id,  # 使用Supabase Auth生成的用户ID作为主键
                         "username": username,
                         "nickname": user.nickname,
-                        "email": user.email,
                         "created_at": created_at_iso,
                         "updated_at": created_at_iso
                     }
