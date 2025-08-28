@@ -2,40 +2,49 @@
 
 ## 📋 API端点总览
 
-### **认证接口 (4个)**
+### **认证接口 (10个)**
 - `POST /api/v1/auth/register` - 用户注册
 - `POST /api/v1/auth/signup` - 用户注册（别名）
 - `POST /api/v1/auth/login` - 用户登录
 - `POST /api/v1/auth/signout` - 用户登出
+- `POST /api/v1/auth/check-email` - 检查邮箱（query参数）
+- `GET /api/v1/auth/profile` - 获取当前用户信息
+- `POST /api/v1/auth/forgot-password` - 发送重置密码邮件（query参数）
+- `GET /api/v1/auth/google/login` - 获取Google OAuth登录信息（占位）
+- `POST /api/v1/auth/google/callback` - Google回调（表单）
+- `POST /api/v1/auth/google/token` - Google ID Token登录（表单）
 
-### **用户管理接口 (2个)**
+### **用户管理接口 (3个)**
 - `GET /api/v1/user/profile` - 获取用户资料
 - `PUT /api/v1/user/profile` - 更新用户资料
+- `POST /api/v1/user/upload-avatar` - 上传头像（表单+文件）
 
 ### **见解管理接口 (6个)**
 - `GET /api/v1/insights` - 获取用户见解列表（分页）
 - `GET /api/v1/insights/all` - 获取用户所有见解
 - `GET /api/v1/insights/{insight_id}` - 获取单个见解详情
-- `POST /api/v1/insights` - 创建新见解
+- `POST /api/v1/insights` - 创建新见解（自动提取metadata）
 - `PUT /api/v1/insights/{insight_id}` - 更新见解
 - `DELETE /api/v1/insights/{insight_id}` - 删除见解
 
-### **用户标签管理接口 (5个)**
+### **用户标签管理接口 (7个)**
 - `GET /api/v1/user-tags` - 获取用户标签列表
 - `GET /api/v1/user-tags/{tag_id}` - 获取单个标签详情
 - `POST /api/v1/user-tags` - 创建新标签
 - `PUT /api/v1/user-tags/{tag_id}` - 更新标签
 - `DELETE /api/v1/user-tags/{tag_id}` - 删除标签
+- `GET /api/v1/user-tags/stats/overview` - 标签统计概览
+- `GET /api/v1/user-tags/search` - 搜索标签
 
 ### **元数据提取接口 (2个)**
-- `POST /api/v1/metadata/extract` - 提取网页元数据
-- `POST /api/v1/metadata/create-insight` - 从URL创建见解
+- `POST /api/v1/metadata/extract` - 提取网页元数据（表单）
+- `POST /api/v1/metadata/create-insight` - 从URL创建见解（表单）
 
 ### **系统接口 (2个)**
 - `GET /` - API根路径
 - `GET /health` - 健康检查
 
-**总计：21个API端点**
+**总计：30个API端点**
 
 ---
 
@@ -67,6 +76,23 @@ Content-Type: application/json
     },
     "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
     "token_type": "bearer"
+  }
+}
+```
+
+### 获取当前用户
+```http
+GET /api/v1/auth/profile
+Authorization: Bearer {token}
+```
+
+**响应示例：**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "email": "user@example.com"
   }
 }
 ```
@@ -110,6 +136,37 @@ Authorization: Bearer {token}
   "message": "登出成功"
 }
 ```
+
+### 检查邮箱
+```http
+POST /api/v1/auth/check-email?email=user@example.com
+```
+
+**响应示例：**
+```json
+{
+  "success": true,
+  "data": { "exists": false }
+}
+```
+
+### 忘记密码
+```http
+POST /api/v1/auth/forgot-password?email=user@example.com
+```
+
+**响应示例：**
+```json
+{
+  "success": true,
+  "message": "重置密码邮件已发送"
+}
+```
+
+### Google 登录（占位端点）
+- `GET /api/v1/auth/google/login` 返回 OAuth 基本信息（占位）
+- `POST /api/v1/auth/google/callback` 表单参数：`code`
+- `POST /api/v1/auth/google/token` 表单参数：`id_token`
 
 ## 🧠 见解管理接口
 
@@ -433,6 +490,52 @@ Authorization: Bearer {token}
 }
 ```
 
+### 搜索标签
+```http
+GET /api/v1/user-tags/search?q=AI&user_id=xxx
+Authorization: Bearer {token}
+```
+
+**响应示例：**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "880e8400-e29b-41d4-a716-446655440000",
+      "user_id": "550e8400-e29b-41d4-a716-446655440000",
+      "name": "AI",
+      "color": "#FF5733",
+      "created_at": "2024-01-15T10:30:00Z",
+      "updated_at": "2024-01-15T10:30:00Z"
+    }
+  ]
+}
+```
+
+### 标签统计概览
+```http
+GET /api/v1/user-tags/stats/overview
+Authorization: Bearer {token}
+```
+
+**响应示例：**
+```json
+{
+  "success": true,
+  "data": {
+    "total_tags": 12,
+    "total_insights": 34,
+    "most_used_tags": [
+      { "name": "AI", "count": 10, "color": "#3B82F6" }
+    ],
+    "recent_tags": [
+      { "name": "机器学习", "created_at": "2024-01-15T10:30:00Z" }
+    ]
+  }
+}
+```
+
 ### 获取标签详情
 ```http
 GET /api/v1/user-tags/{tag_id}
@@ -685,11 +788,11 @@ if (insightData.success) {
 
 **功能**: 提取网页的元数据信息，不创建insight
 
-**输入**:
-```json
-{
-  "url": "https://example.com/article"
-}
+**输入（表单）**:
+```
+Content-Type: application/x-www-form-urlencoded
+
+url=https://example.com/article
 ```
 
 **输出**:
@@ -714,33 +817,22 @@ if (insightData.success) {
 
 **功能**: 先提取网页metadata，再创建insight（两步合一）
 
-**输入**:
-```json
-{
-  "url": "https://example.com/article",
-  "title": "自定义标题（可选）",
-  "description": "自定义描述（可选）",
-  "image_url": "自定义图片（可选）",
-  "thought": "用户的想法/备注（可选）",
-  "tags": "tag1,tag2"（可选，标签名称，逗号分隔）
-}
+**输入（表单）**:
+```
+Content-Type: application/x-www-form-urlencoded
+
+url=https://example.com/article
+&title=自定义标题（可选）
+&description=自定义描述（可选）
+&tags=AI,技术,趋势  # 逗号分隔的标签名称（可选）
 ```
 
-**字段说明：**
-- **`url`** (必需): 网页链接
-- **`title`** (可选): 自定义标题，如果不提供则使用网页自动提取的标题
-- **`description`** (可选): 自定义描述，如果不提供则使用网页自动提取的描述，最大3000字符
-- **`image_url`** (可选): 自定义图片地址，如果不提供则使用网页自动提取的图片
-- **`thought`** (可选): 用户的想法/备注，最大2000字符
-- **`tags`** (可选): 标签名称，逗号分隔的字符串，如 "AI,技术,趋势"
+**说明：**
+- 此端点会创建一条 `insights` 记录，并填充 `title/description/image_url` 等字段。
+- 表单中的 `tags` 会以名称数组形式写入 `insights.tags` 字段；不会在此端点建立 `insight_tags` 关联。
+- 如需以标签ID建立正式关联，请使用 `POST /api/v1/insights` 并传入 `tag_ids`。
 
-**标签处理逻辑：**
-- 前端传入标签字符串：`"AI,技术,趋势"`
-- 后端自动分割并处理标签名称
-- 智能匹配现有标签或创建新标签
-- 通过 `insight_tags` 表建立关联关系
-
-**输出**:
+**输出（示例）**:
 ```json
 {
   "success": true,
@@ -752,26 +844,9 @@ if (insightData.success) {
     "title": "最终标题",
     "description": "最终描述",
     "image_url": "https://example.com/image.jpg",
-    "thought": "用户的想法/备注",
+    "tags": ["AI", "技术", "趋势"],
     "created_at": "2024-01-01T00:00:00.000Z",
-    "updated_at": "2024-01-01T00:00:00.000Z",
-    "tags": [
-      {
-        "id": "tag-uuid-1",
-        "name": "AI",
-        "color": "#3B82F6"
-      },
-      {
-        "id": "tag-uuid-2", 
-        "name": "技术",
-        "color": "#10B981"
-      },
-      {
-        "id": "tag-uuid-3",
-        "name": "趋势",
-        "color": "#8B5CF6"
-      }
-    ]
+    "updated_at": "2024-01-01T00:00:00.000Z"
   }
 }
 ```
@@ -810,6 +885,26 @@ Content-Type: application/json
   "nickname": "新昵称",
   "bio": "这是我的新个人简介",
   "avatar_url": "https://example.com/new-avatar.jpg"
+}
+```
+
+### 上传头像
+```http
+POST /api/v1/user/upload-avatar
+Authorization: Bearer {token}
+Content-Type: multipart/form-data
+
+avatar: <file>
+user_id: <当前用户ID>
+```
+
+**响应示例：**
+```json
+{
+  "success": true,
+  "data": {
+    "avatar_url": "https://example.com/avatars/<user_id>.jpg"
+  }
 }
 ```
 
