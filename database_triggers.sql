@@ -171,3 +171,24 @@ COMMENT ON FUNCTION public.create_profile_for_new_user() IS '自动为新注册�
 COMMENT ON FUNCTION public.create_default_tags_for_new_user() IS '自动为新用户添加默认标签';
 COMMENT ON FUNCTION public.update_profile_timestamp() IS '自动更新记录的时间戳';
 COMMENT ON FUNCTION public.soft_delete_insight() IS '实现软删除功能';
+
+--
+-- 附：网页内容存储表（需在 Supabase 手动执行）
+--
+-- create table if not exists public.insight_contents (
+--   id uuid primary key default gen_random_uuid(),
+--   insight_id uuid not null references public.insights(id) on delete cascade,
+--   user_id uuid not null references auth.users(id) on delete cascade,
+--   url text not null,
+--   html text,
+--   text text,
+--   content_type text,
+--   extracted_at timestamptz default now(),
+--   created_at timestamptz default now()
+-- );
+--
+-- alter table public.insight_contents enable row level security;
+-- create policy "insight_contents_select_own" on public.insight_contents for select using ( auth.uid() = user_id );
+-- create policy "insight_contents_insert_own" on public.insight_contents for insert with check ( auth.uid() = user_id ) to authenticated;
+-- create policy "insight_contents_update_own" on public.insight_contents for update using ( auth.uid() = user_id );
+-- create policy "insight_contents_delete_own" on public.insight_contents for delete using ( auth.uid() = user_id );

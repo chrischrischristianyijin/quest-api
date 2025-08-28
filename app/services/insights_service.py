@@ -1,8 +1,9 @@
 from typing import List, Optional, Dict, Any
 from uuid import UUID
-from app.core.database import get_supabase
+from app.core.database import get_supabase, get_supabase_service
 from app.models.insight import InsightCreate, InsightUpdate, InsightResponse, InsightListResponse
 from app.services.insight_tag_service import InsightTagService
+from app.utils.metadata import fetch_page_content
 import logging
 
 logger = logging.getLogger(__name__)
@@ -21,6 +22,7 @@ class InsightsService:
         """获取insights列表（分页）"""
         try:
             supabase = get_supabase()
+            supabase_service = get_supabase_service()
             
             # 确定要查询的用户ID - 如果没有指定target_user_id，默认查询当前用户
             query_user_id = str(target_user_id) if target_user_id else str(user_id)
@@ -253,6 +255,22 @@ class InsightsService:
             
             insight = response.data[0]
             insight_id = UUID(insight['id'])
+
+            # 抓取并保存网页内容（HTML与纯文本） - 失败不影响主流程
+            try:
+                page = await fetch_page_content(insight_data.url)
+                content_payload = {
+                    'insight_id': str(insight_id),
+                    'user_id': str(user_id),
+                    'url': insight_data.url,
+                    'html': page.get('html'),
+                    'text': page.get('text'),
+                    'content_type': page.get('content_type'),
+                    'extracted_at': page.get('extracted_at')
+                }
+                supabase_service.table('insight_contents').insert(content_payload).execute()
+            except Exception as content_err:
+                logger.warning(f"保存网页内容失败（不影响主流程）: {content_err}")
             
             # 处理标签
             if insight_data.tag_ids:
