@@ -38,7 +38,7 @@
 
 ### **元数据提取接口 (2个)**
 - `POST /api/v1/metadata/extract` - 提取网页元数据（表单）
-- `POST /api/v1/metadata/create-insight` - 从URL创建见解（表单）
+- `POST /api/v1/metadata/create-insight` - 已废弃：仅返回元数据（等价于 /api/v1/metadata/extract）
 
 ### **系统接口 (2个)**
 - `GET /` - API根路径
@@ -812,41 +812,31 @@ url=https://example.com/article
 }
 ```
 
-### 2. 从URL创建Insight（包含Metadata提取）
+### 2. 从URL创建Insight（已废弃）
 **POST** `/api/v1/metadata/create-insight`
 
-**功能**: 先提取网页metadata，再创建insight（两步合一）
+**当前行为**: 仅提取网页元数据并返回（不创建 insight），与 `/api/v1/metadata/extract` 一致。
 
 **输入（表单）**:
 ```
 Content-Type: application/x-www-form-urlencoded
 
 url=https://example.com/article
-&title=自定义标题（可选）
-&description=自定义描述（可选）
-&tags=AI,技术,趋势  # 逗号分隔的标签名称（可选）
 ```
-
-**说明：**
-- 此端点会创建一条 `insights` 记录，并填充 `title/description/image_url` 等字段。
-- 表单中的 `tags` 会以名称数组形式写入 `insights.tags` 字段；不会在此端点建立 `insight_tags` 关联。
-- 如需以标签ID建立正式关联，请使用 `POST /api/v1/insights` 并传入 `tag_ids`。
 
 **输出（示例）**:
 ```json
 {
   "success": true,
-  "message": "从URL创建insight成功",
+  "message": "此端点已废弃，仅返回元数据。请改用 /api/v1/insights 创建。",
   "data": {
-    "id": "uuid",
-    "user_id": "user_uuid",
     "url": "https://example.com/article",
-    "title": "最终标题",
-    "description": "最终描述",
+    "title": "文章标题",
+    "description": "文章描述",
     "image_url": "https://example.com/image.jpg",
-    "tags": ["AI", "技术", "趋势"],
-    "created_at": "2024-01-01T00:00:00.000Z",
-    "updated_at": "2024-01-01T00:00:00.000Z"
+    "suggested_tags": [],
+    "domain": "example.com",
+    "extracted_at": "2024-01-01T00:00:00.000Z"
   }
 }
 ```
