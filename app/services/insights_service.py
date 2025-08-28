@@ -243,8 +243,9 @@ class InsightsService:
                 # 移除手动UUID生成，让数据库自动生成
             }
             
-            # 创建insight
-            response = supabase.table('insights').insert(insight_insert_data).execute()
+            # 创建insight（使用 service role 以避免 RLS 造成的插入失败）
+            logger.info(f"准备创建 insight：user_id={user_id}, url={insight_data.url}")
+            response = supabase_service.table('insights').insert(insight_insert_data).execute()
             
             if hasattr(response, 'error') and response.error:
                 logger.error(f"创建insight失败: {response.error}")
@@ -254,11 +255,17 @@ class InsightsService:
                 return {"success": False, "message": "创建insight失败"}
             
             insight = response.data[0]
+            logger.info(f"insight 创建成功: id={insight.get('id')}, user_id={insight.get('user_id')}")
             insight_id = UUID(insight['id'])
 
             # 抓取并保存网页内容（HTML与纯文本） - 失败不影响主流程
             try:
                 page = await fetch_page_content(insight_data.url)
+                logger.info(
+                    f"抓取页面内容完成：status={page.get('status_code')}, ct={page.get('content_type')},"
+                    f" html={'Y' if page.get('html') else 'N'}, text_len={len(page.get('text') or '')},"
+                    f" blocked={page.get('blocked_reason')}"
+                )
                 content_payload = {
                     'insight_id': str(insight_id),
                     'user_id': str(user_id),
@@ -268,7 +275,11 @@ class InsightsService:
                     'content_type': page.get('content_type'),
                     'extracted_at': page.get('extracted_at')
                 }
-                supabase_service.table('insight_contents').insert(content_payload).execute()
+                content_res = supabase_service.table('insight_contents').insert(content_payload).execute()
+                if hasattr(content_res, 'error') and content_res.error:
+                    logger.warning(f"保存 insight_contents 失败: {content_res.error}")
+                else:
+                    logger.info("insight_contents 保存成功")
             except Exception as content_err:
                 logger.warning(f"保存网页内容失败（不影响主流程）: {content_err}")
             

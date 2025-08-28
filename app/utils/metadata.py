@@ -166,9 +166,12 @@ async def fetch_page_content(url: str) -> Dict[str, Any]:
             resp = await _get_with_retries(client, url, max_retries=2, base_delay=0.6)
             resp.raise_for_status()
 
+            status_code = resp.status_code
+            final_url = str(resp.url)
             content_type = (resp.headers.get('content-type') or '').lower()
             html: Optional[str] = None
             text: Optional[str] = None
+            blocked_reason: Optional[str] = None
 
             # 类型判断
             if ('text/html' in content_type) or (content_type.startswith('application/xhtml')) or (content_type == ''):
@@ -202,6 +205,10 @@ async def fetch_page_content(url: str) -> Dict[str, Any]:
                         extracted_text = target.get_text(separator='\n', strip=True)
                         if extracted_text:
                             text = extracted_text[:50000]
+                        # 粗略检测被拦截场景（Cloudflare/反爬）
+                        page_title = (soup.title.string or '').strip() if soup.title and soup.title.string else ''
+                        if 'Just a moment' in page_title or 'Cloudflare' in page_title or 'cf-challenge' in (html or ''):
+                            blocked_reason = 'cloudflare_challenge'
                     except Exception:
                         text = None
             elif content_type.startswith('text/'):
@@ -217,14 +224,20 @@ async def fetch_page_content(url: str) -> Dict[str, Any]:
                 'html': html,
                 'text': text,
                 'content_type': content_type,
-                'extracted_at': datetime.utcnow().isoformat()
+                'extracted_at': datetime.utcnow().isoformat(),
+                'status_code': status_code,
+                'final_url': final_url,
+                'blocked_reason': blocked_reason,
             }
     except Exception:
         return {
             'html': None,
             'text': None,
             'content_type': None,
-            'extracted_at': datetime.utcnow().isoformat()
+            'extracted_at': datetime.utcnow().isoformat(),
+            'status_code': None,
+            'final_url': None,
+            'blocked_reason': 'exception',
         }
 
 
