@@ -6,6 +6,7 @@ from app.services.insight_tag_service import InsightTagService
 from app.utils.metadata import fetch_page_content
 import logging
 import os
+from copy import deepcopy
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +84,7 @@ class InsightsService:
                     description=insight['description'],
                     url=insight.get('url'),
                     image_url=insight.get('image_url'),
+                    meta=insight.get('meta'),
                     created_at=insight['created_at'],
                     updated_at=insight['updated_at'],
                     tags=insight_tags
@@ -217,6 +219,7 @@ class InsightsService:
                 description=insight['description'],
                 url=insight.get('url'),
                 image_url=insight.get('image_url'),
+                meta=insight.get('meta'),
                 created_at=insight['created_at'],
                 updated_at=insight['updated_at'],
                 tags=insight_tags
@@ -244,6 +247,13 @@ class InsightsService:
                 'user_id': str(user_id)
                 # 移除手动UUID生成，让数据库自动生成
             }
+
+            # 可选写入 meta（如列存在），以 JSON 形式存储网页元数据
+            try:
+                if hasattr(insight_data, 'meta') and isinstance(getattr(insight_data, 'meta'), dict):
+                    insight_insert_data['meta'] = getattr(insight_data, 'meta')
+            except Exception:
+                pass
             
             # 创建insight（使用 service role 以避免 RLS 造成的插入失败）
             logger.info(f"准备创建 insight：user_id={user_id}, url={insight_data.url}")
@@ -269,24 +279,47 @@ class InsightsService:
                         f" html={'Y' if page.get('html') else 'N'}, text_len={len(page.get('text') or '')},"
                         f" blocked={page.get('blocked_reason')}"
                     )
-                    # 直接写回 insights 表（按需新增列：html/text/content_type/fetched_at）
-                    content_update = {
+                    # 写入独立表 insight_contents（推荐）
+                    content_payload = {
+                        'insight_id': str(insight_id),
+                        'user_id': str(user_id),
+                        'url': insight_data.url,
                         'html': page.get('html'),
                         'text': page.get('text'),
+                        'markdown': page.get('markdown'),
                         'content_type': page.get('content_type'),
-                        'fetched_at': page.get('extracted_at')
+                        'extracted_at': page.get('extracted_at')
                     }
-                    update_res = (
+
+                    def _sanitize_for_pg(obj: Any) -> Any:
+                        try:
+                            if obj is None:
+                                return None
+                            if isinstance(obj, str):
+                                return obj.replace('\x00', ' ').replace('\u0000', ' ')
+                            if isinstance(obj, dict):
+                                clean = {}
+                                for k, v in obj.items():
+                                    clean[k] = _sanitize_for_pg(v)
+                                return clean
+                            if isinstance(obj, list):
+                                return [_sanitize_for_pg(v) for v in obj]
+                            return obj
+                        except Exception:
+                            return obj
+
+                    safe_payload = _sanitize_for_pg(deepcopy(content_payload))
+
+                    content_res = (
                         supabase_service
-                        .table('insights')
-                        .update(content_update)
-                        .eq('id', str(insight_id))
+                        .table('insight_contents')
+                        .insert(safe_payload)
                         .execute()
                     )
-                    if hasattr(update_res, 'error') and update_res.error:
-                        logger.warning(f"写回 insights(html/text) 失败: {update_res.error}")
+                    if hasattr(content_res, 'error') and content_res.error:
+                        logger.warning(f"保存 insight_contents 失败: {content_res.error}")
                     else:
-                        logger.info("insights 表已写入 html/text")
+                        logger.info("insight_contents 保存成功")
                 except Exception as content_err:
                     logger.warning(f"保存网页内容失败（不影响主流程）: {content_err}")
             else:

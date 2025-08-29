@@ -138,6 +138,11 @@ async def create_insight(
             thought=insight.thought,
             tag_ids=insight.tag_ids
         )
+
+        # 将提取到的完整 metadata 附带在请求生命周期中，通过服务层落库（若列存在）
+        # 动态附加，避免修改 Pydantic 入参模型
+        # 使用字典属性存储，服务中读取
+        setattr(insight_data, "meta", metadata)
         
         insights_service = InsightsService()
         result = await insights_service.create_insight(insight_data, UUID(current_user["id"]))
