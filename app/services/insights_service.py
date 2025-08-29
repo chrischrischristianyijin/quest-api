@@ -269,20 +269,24 @@ class InsightsService:
                         f" html={'Y' if page.get('html') else 'N'}, text_len={len(page.get('text') or '')},"
                         f" blocked={page.get('blocked_reason')}"
                     )
-                    content_payload = {
-                        'insight_id': str(insight_id),
-                        'user_id': str(user_id),
-                        'url': insight_data.url,
+                    # 直接写回 insights 表（按需新增列：html/text/content_type/fetched_at）
+                    content_update = {
                         'html': page.get('html'),
                         'text': page.get('text'),
                         'content_type': page.get('content_type'),
-                        'extracted_at': page.get('extracted_at')
+                        'fetched_at': page.get('extracted_at')
                     }
-                    content_res = supabase_service.table('insight_contents').insert(content_payload).execute()
-                    if hasattr(content_res, 'error') and content_res.error:
-                        logger.warning(f"保存 insight_contents 失败: {content_res.error}")
+                    update_res = (
+                        supabase_service
+                        .table('insights')
+                        .update(content_update)
+                        .eq('id', str(insight_id))
+                        .execute()
+                    )
+                    if hasattr(update_res, 'error') and update_res.error:
+                        logger.warning(f"写回 insights(html/text) 失败: {update_res.error}")
                     else:
-                        logger.info("insight_contents 保存成功")
+                        logger.info("insights 表已写入 html/text")
                 except Exception as content_err:
                     logger.warning(f"保存网页内容失败（不影响主流程）: {content_err}")
             else:
