@@ -89,7 +89,7 @@ async def extract_metadata_from_url(url: str) -> Dict[str, Any]:
             image_url = extract_image(soup, url)
             jsonld_meta = _try_jsonld(soup)
             if jsonld_meta:
-                if (not title) or title == '无标题':
+                if (not title) or title == 'No title':
                     title = jsonld_meta.get('title') or title
                 if not description:
                     description = jsonld_meta.get('description') or description
