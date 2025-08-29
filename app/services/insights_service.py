@@ -232,6 +232,7 @@ class InsightsService:
         """创建新insight"""
         try:
             supabase = get_supabase()
+            supabase_service = get_supabase_service()
             
             # 准备insight数据（不包含tags，让数据库自动生成UUID）
             insight_insert_data = {
