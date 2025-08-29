@@ -18,30 +18,18 @@ logger = logging.getLogger(__name__)
 DEFAULT_TAGS = [
     # 技术相关
     {"name": "Technology", "color": "#3B82F6"},
-    {"name": "Programming", "color": "#10B981"},
-    {"name": "AI", "color": "#8B5CF6"},
-    {"name": "Web Development", "color": "#EF4444"},
     
     # 学习相关
     {"name": "Learning", "color": "#84CC16"},
-    {"name": "Tutorial", "color": "#F97316"},
-    
-    # 内容类型
-    {"name": "Article", "color": "#059669"},
-    {"name": "Video", "color": "#DC2626"},
     
     # 主题分类
-    {"name": "Business", "color": "#1F2937"},
-    {"name": "Productivity", "color": "#047857"},
     {"name": "Design", "color": "#BE185D"},
     
     # 工具和资源
     {"name": "Tool", "color": "#7C2D12"},
-    {"name": "Resource", "color": "#1E40AF"},
     
     # 项目相关
     {"name": "Project", "color": "#7C3AED"},
-    {"name": "Ideas", "color": "#F59E0B"}
 ]
 
 class AuthService:

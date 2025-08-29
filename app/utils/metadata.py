@@ -2,6 +2,7 @@ from typing import Dict, Any, Optional, Callable
 from datetime import datetime
 from urllib.parse import urlparse, urljoin
 import os
+import os
 import httpx
 from bs4 import BeautifulSoup
 import asyncio
@@ -19,13 +20,46 @@ def is_valid_url(url: str) -> bool:
     except Exception:
         return False
 
+def _dbg(message: str) -> None:
+    try:
+        if (os.getenv('METADATA_DEBUG', '').lower() in ('1', 'true', 'yes')):
+            logging.getLogger(__name__).info(f"[metadata] {message}")
+    except Exception:
+        pass
+
 
 async def extract_metadata_from_url(url: str) -> Dict[str, Any]:
     """优先 API/标准源 → 回退页面解析。包含简单的 ETag/Last-Modified 缓存。"""
     # 1) 读取缓存（若存在且未过期）
     cached = _cache_get(url)
     if cached and cached.get('parsed_meta') and not _cache_expired(cached.get('ts', 0)):
+        _dbg(f"cache hit (ttl ok) url={url}")
         return cached['parsed_meta']
+
+    # 1.5) 简化模式：只取 OG/Twitter+basic（通过环境变量启用）
+    try:
+        if (os.getenv('METADATA_SIMPLE', '').lower() in ('1', 'true', 'yes')):
+            _dbg(f"simple meta mode enabled url={url}")
+            async with httpx.AsyncClient(timeout=8.0, proxies=_get_proxies()) as client:
+                resp = await _get_with_retries(client, url)
+                resp.raise_for_status()
+                soup = BeautifulSoup(resp.text or '', 'html.parser')
+                title = extract_title(soup)
+                description = extract_description(soup)
+                image_url = extract_image(soup, url)
+                metadata = {
+                    'title': title,
+                    'description': description,
+                    'image_url': image_url,
+                    'url': url,
+                    'domain': urlparse(url).netloc,
+                    'extracted_at': datetime.utcnow().isoformat()
+                }
+                _cache_set(url, resp, metadata)
+                return metadata
+    except Exception:
+        # 简化模式失败，继续走正常流程
+        _dbg(f"simple meta mode failed, fallback url={url}")
 
     try:
         async with httpx.AsyncClient(timeout=10.0, proxies=_get_proxies()) as client:
@@ -41,45 +75,26 @@ async def extract_metadata_from_url(url: str) -> Dict[str, Any]:
 
             if response.status_code == 304 and cached and cached.get('parsed_meta'):
                 # 未修改：直接返回缓存
+                _dbg(f"304 not modified, return cached url={url}")
                 return cached['parsed_meta']
 
             response.raise_for_status()
             html_content = response.text
             soup = BeautifulSoup(html_content, 'html.parser')
+            _dbg(f"GET ok url={url} status={response.status_code} ct={(response.headers.get('content-type') or '').lower()}")
 
-            # 3) 站点适配器（预留）
-            adapter_meta = await _apply_domain_adapter(url, client)
-            if adapter_meta:
-                _cache_set(url, response, adapter_meta)
-                return adapter_meta
-
-            # 4) oEmbed 探测
-            oembed_meta = await _try_oembed(url, soup, client)
-            if oembed_meta:
-                _cache_set(url, response, oembed_meta)
-                return oembed_meta
-
-            # 5) JSON-LD / Schema.org
-            jsonld_meta = _try_jsonld(soup)
-            if jsonld_meta:
-                jsonld_meta.update({
-                    'url': url,
-                    'domain': urlparse(url).netloc,
-                    'extracted_at': datetime.utcnow().isoformat()
-                })
-                _cache_set(url, response, jsonld_meta)
-                return jsonld_meta
-
-            # 6) RSS/Atom feed（若能发现）
-            rss_meta = await _try_rss(url, soup, client)
-            if rss_meta:
-                _cache_set(url, response, rss_meta)
-                return rss_meta
-
-            # 7) 回退：OG/Twitter meta + 简单规则
+            # 3) 仅 meta：OG/Twitter 基础 + JSON-LD 补全
             title = extract_title(soup)
             description = extract_description(soup)
             image_url = extract_image(soup, url)
+            jsonld_meta = _try_jsonld(soup)
+            if jsonld_meta:
+                if (not title) or title == '无标题':
+                    title = jsonld_meta.get('title') or title
+                if not description:
+                    description = jsonld_meta.get('description') or description
+                if not image_url:
+                    image_url = jsonld_meta.get('image_url') or image_url
             metadata = {
                 "title": title,
                 "description": description,
@@ -89,6 +104,7 @@ async def extract_metadata_from_url(url: str) -> Dict[str, Any]:
                 "extracted_at": datetime.utcnow().isoformat()
             }
             _cache_set(url, response, metadata)
+            _dbg(f"meta-only url={url} title_len={len(metadata['title'] or '')} desc_len={len(metadata['description'] or '')}")
             return metadata
 
     except httpx.TimeoutException as e:

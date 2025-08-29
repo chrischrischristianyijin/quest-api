@@ -5,6 +5,7 @@ from app.models.insight import InsightCreate, InsightUpdate, InsightResponse, In
 from app.services.insight_tag_service import InsightTagService
 from app.utils.metadata import fetch_page_content
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -259,30 +260,33 @@ class InsightsService:
             logger.info(f"insight 创建成功: id={insight.get('id')}, user_id={insight.get('user_id')}")
             insight_id = UUID(insight['id'])
 
-            # 抓取并保存网页内容（HTML与纯文本） - 失败不影响主流程
-            try:
-                page = await fetch_page_content(insight_data.url)
-                logger.info(
-                    f"抓取页面内容完成：status={page.get('status_code')}, ct={page.get('content_type')},"
-                    f" html={'Y' if page.get('html') else 'N'}, text_len={len(page.get('text') or '')},"
-                    f" blocked={page.get('blocked_reason')}"
-                )
-                content_payload = {
-                    'insight_id': str(insight_id),
-                    'user_id': str(user_id),
-                    'url': insight_data.url,
-                    'html': page.get('html'),
-                    'text': page.get('text'),
-                    'content_type': page.get('content_type'),
-                    'extracted_at': page.get('extracted_at')
-                }
-                content_res = supabase_service.table('insight_contents').insert(content_payload).execute()
-                if hasattr(content_res, 'error') and content_res.error:
-                    logger.warning(f"保存 insight_contents 失败: {content_res.error}")
-                else:
-                    logger.info("insight_contents 保存成功")
-            except Exception as content_err:
-                logger.warning(f"保存网页内容失败（不影响主流程）: {content_err}")
+            # 可选：抓取并保存网页内容（HTML与纯文本） - 默认关闭
+            if os.getenv('FETCH_PAGE_CONTENT_ENABLED', '').lower() in ('1', 'true', 'yes'):
+                try:
+                    page = await fetch_page_content(insight_data.url)
+                    logger.info(
+                        f"抓取页面内容完成：status={page.get('status_code')}, ct={page.get('content_type')},"
+                        f" html={'Y' if page.get('html') else 'N'}, text_len={len(page.get('text') or '')},"
+                        f" blocked={page.get('blocked_reason')}"
+                    )
+                    content_payload = {
+                        'insight_id': str(insight_id),
+                        'user_id': str(user_id),
+                        'url': insight_data.url,
+                        'html': page.get('html'),
+                        'text': page.get('text'),
+                        'content_type': page.get('content_type'),
+                        'extracted_at': page.get('extracted_at')
+                    }
+                    content_res = supabase_service.table('insight_contents').insert(content_payload).execute()
+                    if hasattr(content_res, 'error') and content_res.error:
+                        logger.warning(f"保存 insight_contents 失败: {content_res.error}")
+                    else:
+                        logger.info("insight_contents 保存成功")
+                except Exception as content_err:
+                    logger.warning(f"保存网页内容失败（不影响主流程）: {content_err}")
+            else:
+                logger.info("FETCH_PAGE_CONTENT_ENABLED 未开启，跳过全文抓取与保存")
             
             # 处理标签
             if insight_data.tag_ids:
