@@ -118,8 +118,16 @@ async def create_insight(
         auth_service = AuthService()
         current_user = await auth_service.get_current_user(credentials.credentials)
         
-        # 从URL提取metadata（统一使用utils）
-        metadata = await utils_extract_metadata_from_url(insight.url)
+        # 从URL提取metadata（统一使用utils）- 可选，失败不阻断创建
+        try:
+            metadata = await utils_extract_metadata_from_url(insight.url)
+        except Exception as fetch_err:
+            logger.warning(f"提取metadata失败，将使用占位信息继续创建: {fetch_err}")
+            metadata = {
+                "title": "无标题",
+                "description": "",
+                "image_url": None
+            }
         
         # 创建完整的insight数据
         insight_data = InsightCreate(
