@@ -1,6 +1,6 @@
 from typing import Dict, Any, Optional, Callable
 from datetime import datetime
-from urllib.parse import urlparse, urljoin, parse_qs
+from urllib.parse import urlparse, urljoin, parse_qs, unquote
 import os
 import os
 import httpx
@@ -19,6 +19,11 @@ try:
     from youtube_transcript_api import YouTubeTranscriptApi
 except Exception:
     YouTubeTranscriptApi = None
+
+try:
+    from pdfminer.high_level import extract_text as pdf_extract_text
+except Exception:
+    pdf_extract_text = None
 
 
 def is_valid_url(url: str) -> bool:
@@ -504,22 +509,50 @@ async def fetch_page_content(url: str) -> Dict[str, Any]:
                 text = (resp.text or '')[:50000]
                 html = None
             else:
-                # 二进制/富媒体，不处理
-                html = None
-                text = None
+                # PDF: application/pdf 或 URL 以 .pdf 结尾
+                if ('application/pdf' in content_type) or (str(resp.url).lower().endswith('.pdf')):
+                    try:
+                        if pdf_extract_text:
+                            # 直接用响应内容写入内存文件并提取
+                            raw = resp.content or b''
+                            # pdfminer 接口对 bytes 直接支持有限，这里写临时文件更稳
+                            import tempfile
+                            with tempfile.NamedTemporaryFile(suffix='.pdf') as tf:
+                                tf.write(raw)
+                                tf.flush()
+                                pdf_text = pdf_extract_text(tf.name) or ''
+                            max_len = int(os.getenv('PAGE_TEXT_MAX_LEN', '120000') or '120000')
+                            text = _normalize_text(pdf_text, max_len=max_len)
+                            html = None
+                        else:
+                            text = None
+                            html = None
+                    except Exception:
+                        html = None
+                        text = None
+                else:
+                    # 其他二进制/富媒体，不处理
+                    html = None
+                    text = None
 
             # YouTube 字幕抓取（仅当 URL 属于 youtube 且开启）
             try:
                 if os.getenv('YOUTUBE_TRANSCRIPT_ENABLED', '').lower() in ('1', 'true', 'yes'):
                     vid = _extract_youtube_id(url)
+                    _dbg(f"yt check url={url} vid={vid}")
                     if vid and YouTubeTranscriptApi:
                         transcript_text = await _fetch_youtube_transcript_async(vid)
                         if transcript_text:
                             max_len = int(os.getenv('PAGE_TEXT_MAX_LEN', '120000') or '120000')
                             norm_tr = _normalize_text(transcript_text, max_len=max_len)
                             text = (text + '\n\n' if text else '') + norm_tr
-            except Exception:
-                pass
+                            _dbg(f"yt transcript appended len={len(norm_tr)}")
+                        else:
+                            _dbg("yt transcript not available")
+                    elif YouTubeTranscriptApi is None:
+                        _dbg("yt transcript api not installed")
+            except Exception as yt_exc:
+                _dbg(f"yt transcript error: {yt_exc}")
 
             return {
                 'html': html,
@@ -546,18 +579,30 @@ def _extract_youtube_id(url: str) -> Optional[str]:
     try:
         u = urlparse(url)
         host = (u.netloc or '').lower()
-        if 'youtube.com' in host:
+        path = (u.path or '')
+        # 支持多个域：
+        if any(h in host for h in ['youtube.com', 'youtube-nocookie.com', 'm.youtube.com', 'music.youtube.com']):
             qs = parse_qs(u.query or '')
             if 'v' in qs and qs['v']:
                 return qs['v'][0]
-            # /shorts/ 或 /live/
-            parts = (u.path or '').split('/')
-            for i, p in enumerate(parts):
-                if p in ('shorts', 'live') and i + 1 < len(parts):
-                    return parts[i + 1]
+            # /embed/{id}、/shorts/{id}、/live/{id}、/v/{id}
+            parts = [p for p in path.split('/') if p]
+            for marker in ('embed', 'shorts', 'live', 'v'):
+                if marker in parts:
+                    idx = parts.index(marker)
+                    if idx + 1 < len(parts):
+                        return parts[idx + 1]
+            # attribution_link 路径中带 url 编码的 watch?v=
+            if 'attribution_link' in path and 'u=' in (u.query or ''):
+                u_param = parse_qs(u.query).get('u', [None])[0]
+                if u_param:
+                    inner = urlparse(unquote(u_param))
+                    inner_q = parse_qs(inner.query or '')
+                    if 'v' in inner_q and inner_q['v']:
+                        return inner_q['v'][0]
         if 'youtu.be' in host:
-            parts = (u.path or '').split('/')
-            return parts[1] if len(parts) > 1 else None
+            parts = [p for p in path.split('/') if p]
+            return parts[0] if parts else None
         return None
     except Exception:
         return None
@@ -567,27 +612,38 @@ async def _fetch_youtube_transcript_async(video_id: str) -> Optional[str]:
     try:
         if not YouTubeTranscriptApi:
             return None
-        # 同步库，放在线程池会更好；这里直接调用简化
+        # 同步库，直接调用（可按需放线程池）
         transcripts = YouTubeTranscriptApi.list_transcripts(video_id)
-        # 优先中文/英文轨
-        preferred_langs = ['zh-Hans', 'zh-Hant', 'zh-CN', 'zh-TW', 'zh', 'en']
+        env_langs = os.getenv('YOUTUBE_TRANSCRIPT_LANGS', 'zh-Hans,zh,zh-CN,zh-TW,en')
+        preferred_langs = [l.strip() for l in env_langs.split(',') if l.strip()]
         transcript = None
-        for lang in preferred_langs:
-            try:
-                transcript = transcripts.find_transcript([lang])
-                break
-            except Exception:
-                continue
+        # 直接匹配优先语言
+        try:
+            transcript = transcripts.find_transcript(preferred_langs)
+        except Exception:
+            transcript = None
+        # 退而求其次：任意可用字幕
         if not transcript:
             try:
-                transcript = transcripts.find_transcript([t.language_code for t in transcripts])
+                all_list = list(transcripts)
+                transcript = all_list[0] if all_list else None
             except Exception:
                 transcript = None
         if not transcript:
+            _dbg("yt transcript none for video")
             return None
+        # 若语言不在首选且可翻译，尝试翻译
+        if (transcript.language_code not in preferred_langs) and (os.getenv('YOUTUBE_TRANSCRIPT_TRANSLATE', '').lower() in ('1', 'true', 'yes')):
+            try:
+                target = preferred_langs[0] if preferred_langs else 'en'
+                if getattr(transcript, 'is_translatable', False):
+                    transcript = transcript.translate(target)
+            except Exception as tr_exc:
+                _dbg(f"yt translate fail: {tr_exc}")
         data = transcript.fetch()
-        # 拼接为纯文本
-        return '\n'.join([seg.get('text', '') for seg in data if seg.get('text')])
+        text = '\n'.join([seg.get('text', '') for seg in data if seg.get('text')])
+        _dbg(f"yt transcript fetched len={len(text)} lang={getattr(transcript,'language_code','?')}")
+        return text
     except Exception:
         return None
 
