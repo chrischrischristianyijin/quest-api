@@ -20,6 +20,7 @@ class InsightCreate(InsightBase):
 class InsightCreateFromURL(BaseModel):
     """从URL创建Insight的请求模型（前端发送）"""
     url: str = Field(..., max_length=500, description="网页URL（必需）")
+    title: Optional[str] = Field(None, min_length=1, max_length=200, description="用户自定义标题（可选）")
     thought: Optional[str] = Field(None, max_length=2000, description="用户的想法/备注")
     tag_ids: Optional[List[UUID]] = Field(None, description="标签ID列表，直接关联现有标签")
 
