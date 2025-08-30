@@ -37,9 +37,6 @@ async def upload_avatar(
         if len(file_content) > 5 * 1024 * 1024:
             raise HTTPException(status_code=400, detail="文件大小不能超过5MB")
         
-        # 重置文件指针
-        await avatar.seek(0)
-        
         # 生成唯一文件名
         file_extension = Path(avatar.filename).suffix.lower()
         if not file_extension:
