@@ -46,7 +46,7 @@ async def upload_avatar(
         
         # 上传到Supabase Storage
         user_service = UserService()
-        avatar_url = await user_service.upload_avatar_file(file_content, unique_filename)
+        avatar_url = await user_service.upload_avatar_file(file_content, unique_filename, avatar.content_type)
         
         # 更新用户资料中的头像URL
         result = await user_service.upload_avatar(user_id, avatar_url)

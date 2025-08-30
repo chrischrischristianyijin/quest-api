@@ -47,7 +47,7 @@ class UserService:
             logger.error(f"获取用户资料失败: {e}")
             raise ValueError(f"获取用户资料失败: {e}")
 
-    async def upload_avatar_file(self, file_content: bytes, filename: str) -> str:
+    async def upload_avatar_file(self, file_content: bytes, filename: str, content_type: str) -> str:
         """上传头像文件到Supabase Storage"""
         try:
             # 定义存储桶名称
@@ -60,7 +60,7 @@ class UserService:
             upload_response = self.supabase_service.storage.from_(bucket_name).upload(
                 path=filename,
                 file=file_content,
-                file_options={"content-type": "image/*"}
+                file_options={"content-type": content_type}
             )
             
             logger.info(f"文件上传响应: {upload_response}")
@@ -89,7 +89,7 @@ class UserService:
                     upload_response = self.supabase_service.storage.from_(bucket_name).upload(
                         path=filename,
                         file=file_content,
-                        file_options={"content-type": "image/*"}
+                        file_options={"content-type": content_type}
                     )
                     
                     public_url_response = self.supabase_service.storage.from_(bucket_name).get_public_url(filename)
