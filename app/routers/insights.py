@@ -130,8 +130,11 @@ async def create_insight(
             }
         
         # 创建完整的insight数据
+        # 优先使用用户自定义标题，如果没有则使用提取的标题
+        final_title = insight.title if insight.title else metadata.get("title", "无标题")
+        
         insight_data = InsightCreate(
-            title=metadata.get("title", "无标题"),
+            title=final_title,
             description=metadata.get("description", ""),
             url=insight.url,
             image_url=metadata.get("image_url"),
