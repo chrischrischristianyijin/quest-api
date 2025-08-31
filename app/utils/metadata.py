@@ -343,6 +343,253 @@ def _normalize_text(text: Optional[str], max_len: Optional[int] = None) -> str:
         return (text or '')[: max_len or None]
 
 
+
+# -------------------- 段落细化清洗：脚注/断词/图注/空白规整 --------------------
+REFINE_VERSION = "1.3.0"
+OS_PLACEHOLDER = "<<<OS_DATE_PLACEHOLDER>>>"
+SIC_PLACEHOLDER = "<<<SIC_PLACEHOLDER>>>"
+NARROW_NBSP_GUARD = "<<<NARROW_NBSP>>>"  # U+202F 保护
+
+# 零信息脚注（含全角/中文括号变体）： [e]/[12]、［a］/［12］、【1】 等
+FOOTNOTE_RE_ASCII = re.compile(r"\s*\[(?:[a-zA-Z]|\d{1,3})\]\s*")
+FOOTNOTE_RE_FULLWIDTH = re.compile(r"\s*[\uFF3B](?:[A-Za-z]|[\uFF10-\uFF19]{1,3})[\uFF3D]\s*")
+FOOTNOTE_RE_CORNER = re.compile(r"\s*[\u3010](?:[A-Za-z]|\d{1,3})[\u3011]\s*")
+FOOTNOTE_RE_PAREN_NOTE = re.compile(r"\s*（注(?:[0-9０-９]{0,2})）\s*")
+
+# 保护 [O.S. ...] / [sic]（含全角/角括）
+PROTECT_OS_SIC = re.compile(r"[\[\uFF3B\u3010]((?:O\.S\.|sic)\s*?[^\]\uFF3D\u3011]+)[\]\uFF3D\u3011]", re.I)
+
+CAPTION_HINT = re.compile(r"\b(class photo|mugshot|first issue of pravda|figcaption)\b", re.I)
+STAGE_HINT = re.compile(r"^\[?(music|applause|laughter|silence|inaudible|crosstalk)\]?$", re.I)
+TIMESTAMP_HINT = re.compile(r"^\[?(?:\d{1,2}:\d{2}(?::\d{2}(?:,\d{3})?)?)\]?$")
+
+def refine_extracted_text_with_report(s: str) -> tuple[str, Dict[str, Any]]:
+    """通用提取后文本清洗，返回 (clean_text, report)。
+    规则包含：脚注剔除/保护、空行与空白策略、列表续行、PDF 断词修复、
+    CJK 间距、字幕指示与时间戳过滤、可选破折号/引号风格、分节符保留等。
+    """
+    report: Dict[str, Any] = {
+        'eol_normalized': False,
+        'leading_trailing_blanks_removed': [0, 0],
+        'max_consec_blanks_before': 0,
+        'max_consec_blanks_after': 0,
+        'tabs_found': 0,
+        'nnbsp_found': 0,
+        'zw_removed': 0,
+        'list_items_detected': 0,
+        'list_wrapped_lines': 0,
+        'poetry_blocks_preserved': False,
+        'hyphenation_joins': 0,
+    }
+
+    # 读取环境配置
+    def _bool(env: str, default: bool = True) -> bool:
+        v = os.getenv(env)
+        if v is None:
+            return default
+        return v.lower() in ('1', 'true', 'yes', 'on')
+
+    NORMALIZE_EOL = _bool('NORMALIZE_EOL', True)
+    TRIM_LEADING = _bool('TRIM_LEADING_BLANKS', True)
+    TRIM_TRAILING = _bool('TRIM_TRAILING_BLANKS', True)
+    PRESERVE_SECTION_BREAKS = _bool('PRESERVE_SECTION_BREAKS', True)
+    KEEP_POETRY_LINEBREAKS = _bool('KEEP_POETRY_LINEBREAKS', False)
+    KEEP_ZWJ = _bool('KEEP_ZWJ', True)
+    KEEP_NNBSP_FOR_UNITS = _bool('KEEP_NNBSP_FOR_UNITS', True)
+
+    try:
+        # 0) 统计初始状态
+        report['tabs_found'] = s.count('\t')
+        report['nnbsp_found'] = s.count('\u00A0') + s.count('\u2007') + s.count('\u202F')
+        # 最大连续空行（before）
+        report['max_consec_blanks_before'] = max((len(m) for m in re.findall(r'\n{2,}', s)), default=0)
+
+        # 1) EOL 归一
+        if NORMALIZE_EOL:
+            if ('\r' in s):
+                s = s.replace('\r\n', '\n').replace('\r', '\n')
+                report['eol_normalized'] = True
+
+        # 2) 去 BOM 与控制字符（保留 \n、\t）
+        if s.startswith('\ufeff'):
+            s = s.lstrip('\ufeff')
+        s = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', '', s)
+
+        # 3) Tabs → 空格，再合并多空白
+        tabw = int(os.getenv('COLLAPSE_TABS', '4') or '4')
+        if report['tabs_found'] > 0 and tabw > 0:
+            s = s.expandtabs(tabw)
+
+        # 4) 软连字符/零宽字符（保留 ZWJ/LRM/RLM）
+        before_len = len(s)
+        s = s.replace('\u00AD', '').replace('\u200B', '')
+        if not KEEP_ZWJ:
+            s = s.replace('\u200D', '')
+        report['zw_removed'] = before_len - len(s)
+
+        # 5) 保护 U+202F（数字+单位），其余 NBSP 家族转空格
+        PROTECT = '<<<NNBSP_UNIT>>>'
+        if KEEP_NNBSP_FOR_UNITS:
+            s = re.sub(r'(\d)\u202F(?=\S)', r'\1' + PROTECT, s)
+        s = s.replace('\u00A0', ' ').replace('\u2007', ' ').replace('\u202F', ' ')
+        s = s.replace(PROTECT, '\u202F')
+
+        # 6) 保护 O.S./sic 变体
+        def _protect_os_sic(match: re.Match) -> str:
+            inner = match.group(1)
+            if inner.lower().startswith('o.s.'):
+                return OS_PLACEHOLDER + inner
+            return SIC_PLACEHOLDER + inner
+        s = PROTECT_OS_SIC.sub(_protect_os_sic, s)
+
+        # 7) 剔除零信息脚注族
+        s = FOOTNOTE_RE_ASCII.sub('', s)
+        s = FOOTNOTE_RE_FULLWIDTH.sub('', s)
+        s = FOOTNOTE_RE_CORNER.sub('', s)
+        s = FOOTNOTE_RE_PAREN_NOTE.sub('', s)
+
+        # 8) O.S./sic 还原为括号，缺右括补全
+        s = s.replace(OS_PLACEHOLDER, '(')
+        s = s.replace(SIC_PLACEHOLDER, '(')
+        s = re.sub(r'\(O\.S\.[^\)\n]+', lambda m: m.group(0) + ')', s)
+        s = re.sub(r'\(sic[^\)\n]+', lambda m: m.group(0) + ')', s, flags=re.I)
+
+        # 9) 去掉舞台指示/时间戳独立行，标准化说话人
+        normalized_lines: list[str] = []
+        for ln in (s.split('\n')):
+            raw = ln.strip()
+            if raw == '':
+                normalized_lines.append('')
+                continue
+            if CAPTION_HINT.search(raw) and len(raw) < 200:
+                continue
+            if STAGE_HINT.match(raw):
+                continue
+            if TIMESTAMP_HINT.match(raw):
+                continue
+            if re.match(r'^[A-Z][A-Z0-9 _-]{1,20}:', raw):
+                raw = re.sub(r'^([A-Z][A-Z0-9 _-]{1,20}):', r'**\1:**', raw)
+            normalized_lines.append(raw)
+        s = '\n'.join(normalized_lines)
+
+        # 10) PDF 断词修复：word-\nwrap → wordwrap
+        def _join_hyphen(m: re.Match) -> str:
+            report['hyphenation_joins'] += 1
+            return m.group(1) + m.group(2)
+        s = re.sub(r'([A-Za-z]{2,})-\n([A-Za-z]{2,})', _join_hyphen, s)
+
+        # 11) 行尾空白去除
+        s = re.sub(r'[ \t]+\n', '\n', s)
+
+        # 12) 列表续行与项目计数
+        lines = s.split('\n')
+        out_lines: list[str] = []
+        list_item_re = re.compile(r'^\s*(?:[-*+]|\d{1,3}\.)\s+')
+        indent_re = re.compile(r'^(\s{2,}).+')
+        in_list = False
+        current_indent = ''
+        for ln in lines:
+            if list_item_re.match(ln):
+                report['list_items_detected'] += 1
+                in_list = True
+                m = indent_re.match(ln)
+                current_indent = m.group(1) if m else ''
+                out_lines.append(ln.rstrip())
+                continue
+            if in_list and (ln.startswith(current_indent) or ln.startswith('  ')) and not list_item_re.match(ln) and ln.strip() != '':
+                # 续行：拼接到上一行
+                out_lines[-1] = (out_lines[-1].rstrip() + ' ' + ln.strip())
+                report['list_wrapped_lines'] += 1
+                continue
+            in_list = False
+            current_indent = ''
+            out_lines.append(ln)
+        s = '\n'.join(out_lines)
+
+        # 13) 诗歌/歌词保护（可选）
+        if not KEEP_POETRY_LINEBREAKS:
+            # 合并段内换行 → 空格
+            paragraphs = re.split(r'\n{2,}', s)
+            merged: list[str] = []
+            for p in paragraphs:
+                # 检测短行块
+                lines_p = [x for x in p.split('\n') if x.strip() != '']
+                short_block = len(lines_p) >= 3 and all(len(x) < 40 and not re.search(r'[。！？.!?]$', x) for x in lines_p)
+                if short_block:
+                    report['poetry_blocks_preserved'] = True
+                    merged.append('\n'.join(lines_p))
+                    continue
+                one = re.sub(r'[ \t]*\n[ \t]*', ' ', p)
+                one = re.sub(r'\s+', ' ', one).strip()
+                merged.append(one)
+            s = '\n\n'.join([m for m in merged if m])
+
+        # 14) CJK 间距策略
+        # 汉字之间不留空格
+        s = re.sub(r'([\u4E00-\u9FFF])\s+([\u4E00-\u9FFF])', r'\1\2', s)
+        # 汉字与英文/数字之间：auto/none/always
+        side = (os.getenv('CJK_SIDE_SPACE') or 'auto').lower()
+        if side == 'none':
+            s = re.sub(r'([\u4E00-\u9FFF])\s+([A-Za-z0-9])', r'\1\2', s)
+            s = re.sub(r'([A-Za-z0-9])\s+([\u4E00-\u9FFF])', r'\1\2', s)
+        elif side == 'always':
+            s = re.sub(r'([\u4E00-\u9FFF])([A-Za-z0-9])', r'\1 \2', s)
+            s = re.sub(r'([A-Za-z0-9])([\u4E00-\u9FFF])', r'\1 \2', s)
+        else:  # auto：仅在两侧都是 ASCII 单词边界时保留 1 空格
+            s = re.sub(r'([\u4E00-\u9FFF])\s*([A-Za-z0-9])', r'\1 \2', s)
+            s = re.sub(r'([A-Za-z0-9])\s*([\u4E00-\u9FFF])', r'\1 \2', s)
+
+        # 15) 句点后双空格 → 单空格
+        s = re.sub(r'([.!?。！？])\s{2,}', r'\1 ', s)
+
+        # 16) 分节符保留与统一
+        if PRESERVE_SECTION_BREAKS:
+            s = re.sub(r'^\s*(?:[-*_]\s*){3,}\s*$', '---', s, flags=re.M)
+
+        # 17) 连续空行压缩
+        max_blanks = int(os.getenv('MAX_CONSEC_BLANKS', '1') or '1')
+        if max_blanks < 1:
+            max_blanks = 1
+        # 统计 before→after
+        report['max_consec_blanks_before'] = max((len(m) for m in re.findall(r'\n{2,}', s)), default=0)
+        s = re.sub(r'\n{'+str(max_blanks+1)+',}', '\n'* (max_blanks+1 - 1 if max_blanks>0 else 1), s)
+        report['max_consec_blanks_after'] = max((len(m) for m in re.findall(r'\n{2,}', s)), default=0)
+
+        # 18) 标点风格（破折号/引号）
+        dash_style = (os.getenv('TEXT_DASH_STYLE') or '').lower()
+        if dash_style == 'hyphen':
+            s = s.replace('—', '-').replace('–', '-')
+        quote_style = (os.getenv('TEXT_QUOTES_STYLE') or '').lower()
+        if quote_style == 'ascii':
+            s = (s
+                 .replace('“', '"').replace('”', '"')
+                 .replace('‘', "'").replace('’', "'"))
+
+        # 19) 还原受保护的窄不换行空格
+        s = s.replace(NARROW_NBSP_GUARD, '\u202F')
+
+        # 20) 首尾空行裁剪
+        if TRIM_LEADING:
+            leading = len(re.match(r'^(\n+)', s).group(1)) if re.match(r'^(\n+)', s) else 0
+            if leading:
+                report['leading_trailing_blanks_removed'][0] = leading
+                s = s.lstrip('\n')
+        if TRIM_TRAILING:
+            trailing = len(re.search(r'(\n+)$', s).group(1)) if re.search(r'(\n+)$', s) else 0
+            if trailing:
+                report['leading_trailing_blanks_removed'][1] = trailing
+                s = s.rstrip('\n')
+
+        return s.strip(), report
+    except Exception:
+        return s, report
+
+
+def refine_extracted_text(s: str) -> str:
+    text, _rep = refine_extracted_text_with_report(s)
+    return text
+
+
 def extract_keywords(soup: BeautifulSoup) -> Optional[str]:
     tag = soup.find('meta', attrs={'name': 'keywords'})
     if tag and tag.get('content'):
@@ -458,6 +705,7 @@ async def fetch_page_content(url: str) -> Dict[str, Any]:
             html: Optional[str] = None
             text: Optional[str] = None
             blocked_reason: Optional[str] = None
+            refine_report: Optional[Dict[str, Any]] = None
 
             # 类型判断
             if ('text/html' in content_type) or (content_type.startswith('application/xhtml')) or (content_type == ''):
@@ -478,7 +726,10 @@ async def fetch_page_content(url: str) -> Dict[str, Any]:
                         extracted_text = article_soup.get_text('\n', strip=True)
                         if extracted_text:
                             max_len = int(os.getenv('PAGE_TEXT_MAX_LEN', '120000') or '120000')
-                            text = _normalize_text(extracted_text, max_len=max_len)
+                            # 先做段落级清洗（脚注/断词/图注等），再统一规范化
+                            refined, rep = refine_extracted_text_with_report(extracted_text)
+                            text = _normalize_text(refined, max_len=max_len)
+                            refine_report = rep
                         # 返回净化后的HTML
                         html = cleaned_html
                     except Exception:
@@ -496,7 +747,9 @@ async def fetch_page_content(url: str) -> Dict[str, Any]:
                         extracted_text = target_soup.get_text(separator='\n', strip=True)
                         if extracted_text:
                             max_len = int(os.getenv('PAGE_TEXT_MAX_LEN', '120000') or '120000')
-                            text = _normalize_text(extracted_text, max_len=max_len)
+                            refined, rep = refine_extracted_text_with_report(extracted_text)
+                            text = _normalize_text(refined, max_len=max_len)
+                            refine_report = rep
                         html = cleaned_html
                         # 粗略检测被拦截场景（Cloudflare/反爬）
                         page_title = (soup.title.string or '').strip() if soup.title and soup.title.string else ''
@@ -506,7 +759,10 @@ async def fetch_page_content(url: str) -> Dict[str, Any]:
                         text = None
             elif content_type.startswith('text/'):
                 # 纯文本资源
-                text = (resp.text or '')[:50000]
+                raw_text = (resp.text or '')[:50000]
+                refined, rep = refine_extracted_text_with_report(raw_text)
+                text = _normalize_text(refined, max_len=int(os.getenv('PAGE_TEXT_MAX_LEN', '120000') or '120000'))
+                refine_report = rep
                 html = None
             else:
                 # PDF: application/pdf 或 URL 以 .pdf 结尾
@@ -522,7 +778,9 @@ async def fetch_page_content(url: str) -> Dict[str, Any]:
                                 tf.flush()
                                 pdf_text = pdf_extract_text(tf.name) or ''
                             max_len = int(os.getenv('PAGE_TEXT_MAX_LEN', '120000') or '120000')
-                            text = _normalize_text(pdf_text, max_len=max_len)
+                            refined, rep = refine_extracted_text_with_report(pdf_text)
+                            text = _normalize_text(refined, max_len=max_len)
+                            refine_report = rep
                             html = None
                         else:
                             text = None
@@ -544,7 +802,8 @@ async def fetch_page_content(url: str) -> Dict[str, Any]:
                         transcript_text = await _fetch_youtube_transcript_async(vid)
                         if transcript_text:
                             max_len = int(os.getenv('PAGE_TEXT_MAX_LEN', '120000') or '120000')
-                            norm_tr = _normalize_text(transcript_text, max_len=max_len)
+                            refined_tr, _ = refine_extracted_text_with_report(transcript_text)
+                            norm_tr = _normalize_text(refined_tr, max_len=max_len)
                             text = (text + '\n\n' if text else '') + norm_tr
                             _dbg(f"yt transcript appended len={len(norm_tr)}")
                         else:
@@ -562,6 +821,8 @@ async def fetch_page_content(url: str) -> Dict[str, Any]:
                 'status_code': status_code,
                 'final_url': final_url,
                 'blocked_reason': blocked_reason,
+                'refine_version': REFINE_VERSION,
+                'refine_report': refine_report,
             }
     except Exception:
         return {
