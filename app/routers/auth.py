@@ -55,19 +55,15 @@ async def login(user: UserLogin):
 async def google_login():
     """Google登录端点 - 返回OAuth URL"""
     try:
-        # 这里应该返回Google OAuth URL
-        # 暂时返回占位符
-        return {
-            "success": True,
-            "message": "Google登录",
-            "data": {
-                "oauth_url": "https://accounts.google.com/oauth/authorize",
-                "client_id": "YOUR_GOOGLE_CLIENT_ID",
-                "redirect_uri": "YOUR_REDIRECT_URI",
-                "scope": "openid email profile",
-                "response_type": "code"
-            }
-        }
+        auth_service = AuthService()
+        result = await auth_service.google_login()
+        return result
+    except ValueError as e:
+        logger.error(f"Google登录配置错误: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
     except Exception as e:
         logger.error(f"Google登录失败: {e}")
         raise HTTPException(
@@ -76,19 +72,18 @@ async def google_login():
         )
 
 @router.post("/google/callback")
-async def google_callback(code: str = Form(...)):
+async def google_callback(code: str = Form(...), state: str = Form(None)):
     """Google登录回调 - 处理授权码"""
     try:
-        # 这里应该处理Google OAuth授权码
-        # 暂时返回占位符
-        return {
-            "success": True,
-            "message": "Google登录回调功能开发中",
-            "data": {
-                "code": code,
-                "note": "需要实现授权码交换access_token的逻辑"
-            }
-        }
+        auth_service = AuthService()
+        result = await auth_service.google_callback(code, state)
+        return result
+    except ValueError as e:
+        logger.error(f"Google登录回调验证错误: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
     except Exception as e:
         logger.error(f"Google登录回调失败: {e}")
         raise HTTPException(
@@ -100,21 +95,20 @@ async def google_callback(code: str = Form(...)):
 async def google_token_login(id_token: str = Form(...)):
     """Google ID Token登录"""
     try:
-        # 这里应该验证Google ID Token
-        # 暂时返回占位符
-        return {
-            "success": True,
-            "message": "Google ID Token登录功能开发中",
-            "data": {
-                "id_token": id_token,
-                "note": "需要实现Google ID Token验证逻辑"
-            }
-        }
+        auth_service = AuthService()
+        result = await auth_service.google_token_login(id_token)
+        return result
+    except ValueError as e:
+        logger.error(f"Google ID Token验证错误: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
     except Exception as e:
         logger.error(f"Google ID Token登录失败: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Google登录回调处理失败"
+            detail="Google ID Token登录失败"
         )
 
 @router.post("/signout")

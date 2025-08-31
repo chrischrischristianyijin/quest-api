@@ -1,11 +1,17 @@
 from app.core.database import get_supabase, get_supabase_service
+from app.core.config import settings
 from app.models.user import UserCreate, UserLogin, UserResponse
 from typing import Dict, Any, Optional
 import logging
 import uuid
 import os
+import httpx
+import json
 from datetime import datetime
 from supabase import SupabaseException
+from google.auth.transport import requests
+from google.oauth2 import id_token
+from urllib.parse import urlencode
 
 # 配置详细日志
 logging.basicConfig(
@@ -327,14 +333,31 @@ class AuthService:
         try:
             self.logger.info("用户请求Google登录")
             
-            # 这里应该返回Google OAuth的授权URL
-            # 暂时返回占位符
-            oauth_config = {
-                "oauth_url": "https://accounts.google.com/oauth/authorize",
-                "client_id": os.getenv('GOOGLE_CLIENT_ID', 'YOUR_GOOGLE_CLIENT_ID'),
-                "redirect_uri": os.getenv('GOOGLE_REDIRECT_URI', 'YOUR_REDIRECT_URI'),
+            # 检查Google OAuth配置
+            if not settings.GOOGLE_CLIENT_ID or not settings.GOOGLE_REDIRECT_URI:
+                self.logger.error("Google OAuth配置不完整")
+                raise ValueError("Google OAuth配置不完整，请联系管理员")
+            
+            # 构建Google OAuth授权URL
+            oauth_params = {
+                "client_id": settings.GOOGLE_CLIENT_ID,
+                "redirect_uri": settings.GOOGLE_REDIRECT_URI,
                 "scope": "openid email profile",
-                "response_type": "code"
+                "response_type": "code",
+                "access_type": "offline",
+                "include_granted_scopes": "true",
+                "state": str(uuid.uuid4())  # 防止CSRF攻击
+            }
+            
+            oauth_url = f"https://accounts.google.com/o/oauth2/v2/auth?{urlencode(oauth_params)}"
+            
+            oauth_config = {
+                "oauth_url": oauth_url,
+                "client_id": settings.GOOGLE_CLIENT_ID,
+                "redirect_uri": settings.GOOGLE_REDIRECT_URI,
+                "scope": "openid email profile",
+                "response_type": "code",
+                "state": oauth_params["state"]
             }
             
             self.logger.info("✅ Google登录配置获取成功")
@@ -348,49 +371,238 @@ class AuthService:
             self.logger.error(f"Google登录配置获取失败: {str(e)}")
             raise ValueError("Google登录服务暂时不可用")
 
-    async def google_callback(self, code: str) -> dict:
+    async def google_callback(self, code: str, state: str = None) -> dict:
         """Google登录回调处理"""
         try:
             self.logger.info("处理Google登录回调")
             
-            # 这里应该处理Google OAuth授权码
-            # 暂时返回占位符
-            self.logger.info(f"收到授权码: {code[:10]}...")
+            # 检查必要配置
+            if not settings.GOOGLE_CLIENT_ID or not settings.GOOGLE_CLIENT_SECRET or not settings.GOOGLE_REDIRECT_URI:
+                self.logger.error("Google OAuth配置不完整")
+                raise ValueError("Google OAuth配置不完整")
             
-            return {
-                "success": True,
-                "message": "Google登录回调功能开发中",
-                "data": {
-                    "code": code,
-                    "note": "需要实现授权码交换access_token的逻辑"
-                }
+            # 使用授权码交换访问令牌
+            token_url = "https://oauth2.googleapis.com/token"
+            token_data = {
+                "client_id": settings.GOOGLE_CLIENT_ID,
+                "client_secret": settings.GOOGLE_CLIENT_SECRET,
+                "code": code,
+                "grant_type": "authorization_code",
+                "redirect_uri": settings.GOOGLE_REDIRECT_URI,
             }
+            
+            async with httpx.AsyncClient() as client:
+                token_response = await client.post(token_url, data=token_data)
+                
+                if token_response.status_code != 200:
+                    self.logger.error(f"获取访问令牌失败: {token_response.text}")
+                    raise ValueError("获取访问令牌失败")
+                
+                token_data = token_response.json()
+                access_token = token_data.get("access_token")
+                id_token_str = token_data.get("id_token")
+                
+                if not access_token:
+                    self.logger.error("未收到有效的访问令牌")
+                    raise ValueError("未收到有效的访问令牌")
+                
+                # 使用访问令牌获取用户信息
+                user_info_url = f"https://www.googleapis.com/oauth2/v2/userinfo?access_token={access_token}"
+                user_info_response = await client.get(user_info_url)
+                
+                if user_info_response.status_code != 200:
+                    self.logger.error(f"获取用户信息失败: {user_info_response.text}")
+                    raise ValueError("获取用户信息失败")
+                
+                user_info = user_info_response.json()
+                self.logger.info(f"Google用户信息: {user_info.get('email')}")
+                
+                # 创建或登录用户
+                return await self._handle_google_user(user_info, access_token)
             
         except Exception as e:
             self.logger.error(f"Google登录回调处理失败: {str(e)}")
-            raise ValueError("Google登录回调处理失败")
+            raise ValueError(f"Google登录回调处理失败: {str(e)}")
 
-    async def google_token_login(self, id_token: str) -> dict:
+    async def google_token_login(self, id_token_str: str) -> dict:
         """使用Google ID Token登录"""
         try:
             self.logger.info("用户使用Google ID Token登录")
             
-            # 这里应该验证Google ID Token并创建或登录用户
-            # 暂时返回占位符
-            self.logger.info(f"收到ID Token: {id_token[:20]}...")
+            # 检查Google配置
+            if not settings.GOOGLE_CLIENT_ID:
+                self.logger.error("Google OAuth配置不完整")
+                raise ValueError("Google OAuth配置不完整")
+            
+            # 验证ID Token
+            try:
+                id_info = id_token.verify_oauth2_token(
+                    id_token_str, 
+                    requests.Request(), 
+                    settings.GOOGLE_CLIENT_ID
+                )
+                
+                # 验证发行者
+                if id_info['iss'] not in ['accounts.google.com', 'https://accounts.google.com']:
+                    self.logger.error(f"无效的ID Token发行者: {id_info['iss']}")
+                    raise ValueError('无效的Google ID Token')
+                
+                self.logger.info(f"ID Token验证成功: {id_info.get('email')}")
+                
+                # 创建或登录用户
+                return await self._handle_google_user(id_info, None)
+                
+            except ValueError as e:
+                self.logger.error(f"ID Token验证失败: {str(e)}")
+                raise ValueError(f"ID Token验证失败: {str(e)}")
+            
+        except Exception as e:
+            self.logger.error(f"Google ID Token登录失败: {str(e)}")
+            raise ValueError(f"Google ID Token登录失败: {str(e)}")
+    
+    async def _handle_google_user(self, user_info: dict, access_token: str = None) -> dict:
+        """处理Google用户信息，创建或登录用户"""
+        try:
+            email = user_info.get('email')
+            name = user_info.get('name', '')
+            given_name = user_info.get('given_name', '')
+            family_name = user_info.get('family_name', '')
+            picture = user_info.get('picture', '')
+            
+            if not email:
+                self.logger.error("Google用户信息中缺少邮箱")
+                raise ValueError("Google用户信息中缺少邮箱")
+            
+            self.logger.info(f"处理Google用户: {email}")
+            
+            # 检查用户是否已存在
+            try:
+                existing_user = self.supabase_service.table('profiles').select('*').eq('email', email).execute()
+                
+                if existing_user.data:
+                    # 用户已存在，执行登录
+                    user_data = existing_user.data[0]
+                    self.logger.info(f"✅ Google用户登录成功: {email}")
+                    
+                    # 创建Supabase会话
+                    auth_response = await self._create_supabase_session_for_user(user_data['id'])
+                    
+                    return {
+                        "success": True,
+                        "message": "Google登录成功",
+                        "data": {
+                            "user": {
+                                "id": user_data['id'],
+                                "email": email,
+                                "username": user_data['username'],
+                                "nickname": user_data['nickname']
+                            },
+                            "access_token": auth_response.get('access_token'),
+                            "token_type": "bearer"
+                        }
+                    }
+                else:
+                    # 用户不存在，创建新用户
+                    return await self._create_google_user(email, name, given_name, picture)
+                    
+            except Exception as e:
+                self.logger.error(f"处理Google用户时出错: {str(e)}")
+                raise ValueError(f"处理Google用户失败: {str(e)}")
+                
+        except Exception as e:
+            self.logger.error(f"处理Google用户失败: {str(e)}")
+            raise ValueError(f"处理Google用户失败: {str(e)}")
+    
+    async def _create_google_user(self, email: str, name: str, given_name: str, picture: str = None) -> dict:
+        """为Google用户创建新账户"""
+        try:
+            self.logger.info(f"为Google用户创建账户: {email}")
+            
+            # 生成唯一用户名
+            username = self._generate_unique_username(email)
+            nickname = given_name or name or username
+            
+            # 生成随机密码（用户不会使用，仅满足Supabase要求）
+            temp_password = str(uuid.uuid4())
+            
+            # 创建Supabase Auth用户
+            auth_response = self.supabase_service.auth.admin.create_user({
+                "email": email,
+                "password": temp_password,
+                "email_confirm": True,
+                "user_metadata": {
+                    "username": username,
+                    "nickname": nickname,
+                    "provider": "google",
+                    "picture": picture
+                }
+            })
+            
+            if not hasattr(auth_response, 'user') or auth_response.user is None:
+                self.logger.error("创建Google用户失败: 用户对象为空")
+                raise ValueError("用户创建失败")
+            
+            user_id = auth_response.user.id
+            created_at_iso = datetime.utcnow().isoformat()
+            
+            # 创建用户资料
+            profile_data = {
+                "id": user_id,
+                "email": email,
+                "username": username,
+                "nickname": nickname,
+                "avatar_url": picture,
+                "provider": "google",
+                "created_at": created_at_iso,
+                "updated_at": created_at_iso
+            }
+            
+            profile_response = self.supabase_service.table('profiles').insert(profile_data).execute()
+            
+            if not profile_response.data:
+                # 回滚auth用户
+                await self._rollback_auth_user(user_id)
+                raise ValueError("用户资料创建失败")
+            
+            # 添加默认标签
+            await self.add_default_tags_for_user(user_id)
+            
+            # 创建会话
+            session_response = await self._create_supabase_session_for_user(user_id)
+            
+            self.logger.info(f"🎉 Google用户创建成功: {email}")
             
             return {
                 "success": True,
-                "message": "Google ID Token登录功能开发中",
+                "message": "Google账户创建成功",
                 "data": {
-                    "id_token": id_token,
-                    "note": "需要实现ID Token验证和用户创建/登录逻辑"
+                    "user": {
+                        "id": user_id,
+                        "email": email,
+                        "username": username,
+                        "nickname": nickname
+                    },
+                    "access_token": session_response.get('access_token'),
+                    "token_type": "bearer"
                 }
             }
             
         except Exception as e:
-            self.logger.error(f"Google ID Token登录失败: {str(e)}")
-            raise ValueError("Google ID Token登录失败")
+            self.logger.error(f"创建Google用户失败: {str(e)}")
+            raise ValueError(f"创建Google用户失败: {str(e)}")
+    
+    async def _create_supabase_session_for_user(self, user_id: str) -> dict:
+        """为用户创建Supabase会话"""
+        try:
+            # 这里可以根据需要实现会话创建逻辑
+            # 暂时返回空的访问令牌，实际应用中需要生成有效的JWT
+            return {
+                "access_token": f"google_auth_token_{user_id}_{uuid.uuid4()}",
+                "token_type": "bearer"
+            }
+        except Exception as e:
+            self.logger.error(f"创建用户会话失败: {str(e)}")
+            return {"access_token": None}
 
     async def check_email(self, email: str) -> dict:
         """检查邮箱是否可用"""
