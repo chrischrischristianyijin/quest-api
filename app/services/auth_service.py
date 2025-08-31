@@ -475,34 +475,54 @@ class AuthService:
             
             self.logger.info(f"处理Google用户: {email}")
             
-            # 检查用户是否已存在
+            # 检查用户是否已存在（通过邮箱在auth.users表中查找）
             try:
-                existing_user = self.supabase_service.table('profiles').select('*').eq('email', email).execute()
+                # 尝试通过邮箱查找用户（更高效的方法）
+                existing_auth_user = None
+                try:
+                    # 尝试使用邮箱查找auth用户
+                    auth_response = self.supabase_service.auth.admin.get_user_by_email(email)
+                    if auth_response and hasattr(auth_response, 'user') and auth_response.user:
+                        existing_auth_user = auth_response.user
+                        self.logger.info(f"找到已存在的auth用户: {email}")
+                except Exception as lookup_error:
+                    # 如果直接查找失败，用户可能不存在
+                    self.logger.info(f"Auth用户不存在: {email}")
+                    existing_auth_user = None
                 
-                if existing_user.data:
-                    # 用户已存在，执行登录
-                    user_data = existing_user.data[0]
-                    self.logger.info(f"✅ Google用户登录成功: {email}")
+                if existing_auth_user:
+                    # 用户在auth中已存在，检查profiles表
+                    user_id = existing_auth_user.id
+                    profile_query = self.supabase_service.table('profiles').select('*').eq('id', user_id).execute()
                     
-                    # 创建Supabase会话
-                    auth_response = await self._create_supabase_session_for_user(user_data['id'])
-                    
-                    return {
-                        "success": True,
-                        "message": "Google登录成功",
-                        "data": {
-                            "user": {
-                                "id": user_data['id'],
-                                "email": email,
-                                "username": user_data['username'],
-                                "nickname": user_data['nickname']
-                            },
-                            "access_token": auth_response.get('access_token'),
-                            "token_type": "bearer"
+                    if profile_query.data:
+                        # profiles表中也有记录，执行登录
+                        user_data = profile_query.data[0]
+                        self.logger.info(f"✅ Google用户登录成功: {email}")
+                        
+                        # 创建Supabase会话
+                        auth_response = await self._create_supabase_session_for_user(user_data['id'])
+                        
+                        return {
+                            "success": True,
+                            "message": "Google登录成功",
+                            "data": {
+                                "user": {
+                                    "id": user_data['id'],
+                                    "email": email,
+                                    "username": user_data['username'],
+                                    "nickname": user_data['nickname']
+                                },
+                                "access_token": auth_response.get('access_token'),
+                                "token_type": "bearer"
+                            }
                         }
-                    }
+                    else:
+                        # auth表有用户但profiles表没有，需要创建profile
+                        self.logger.info(f"用户在auth表中存在但profiles表中缺失，创建profile: {email}")
+                        return await self._create_profile_for_existing_auth_user(existing_auth_user, name, given_name, picture)
                 else:
-                    # 用户不存在，创建新用户
+                    # 用户完全不存在，创建新用户
                     return await self._create_google_user(email, name, given_name, picture)
                     
             except Exception as e:
@@ -548,7 +568,6 @@ class AuthService:
             # 创建用户资料
             profile_data = {
                 "id": user_id,
-                "email": email,
                 "username": username,
                 "nickname": nickname,
                 "avatar_url": picture,
@@ -591,6 +610,61 @@ class AuthService:
             self.logger.error(f"创建Google用户失败: {str(e)}")
             raise ValueError(f"创建Google用户失败: {str(e)}")
     
+    async def _create_profile_for_existing_auth_user(self, auth_user, name: str, given_name: str, picture: str = None) -> dict:
+        """为已存在的auth用户创建profile记录"""
+        try:
+            email = auth_user.email
+            user_id = auth_user.id
+            self.logger.info(f"为已存在的auth用户创建profile: {email}")
+            
+            # 生成唯一用户名
+            username = self._generate_unique_username(email)
+            nickname = given_name or name or username
+            created_at_iso = datetime.utcnow().isoformat()
+            
+            # 创建用户资料
+            profile_data = {
+                "id": user_id,
+                "username": username,
+                "nickname": nickname,
+                "avatar_url": picture,
+                "provider": "google",
+                "created_at": created_at_iso,
+                "updated_at": created_at_iso
+            }
+            
+            profile_response = self.supabase_service.table('profiles').insert(profile_data).execute()
+            
+            if not profile_response.data:
+                raise ValueError("创建用户资料失败")
+            
+            # 添加默认标签
+            await self.add_default_tags_for_user(user_id)
+            
+            # 创建会话
+            session_response = await self._create_supabase_session_for_user(user_id)
+            
+            self.logger.info(f"✅ 为已存在用户创建profile成功: {email}")
+            
+            return {
+                "success": True,
+                "message": "Google登录成功",
+                "data": {
+                    "user": {
+                        "id": user_id,
+                        "email": email,
+                        "username": username,
+                        "nickname": nickname
+                    },
+                    "access_token": session_response.get('access_token'),
+                    "token_type": "bearer"
+                }
+            }
+            
+        except Exception as e:
+            self.logger.error(f"为已存在auth用户创建profile失败: {str(e)}")
+            raise ValueError(f"创建用户资料失败: {str(e)}")
+
     async def _create_supabase_session_for_user(self, user_id: str) -> dict:
         """为用户创建Supabase会话"""
         try:
