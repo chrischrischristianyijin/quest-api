@@ -571,7 +571,6 @@ class AuthService:
                 "username": username,
                 "nickname": nickname,
                 "avatar_url": picture,
-                "provider": "google",
                 "created_at": created_at_iso,
                 "updated_at": created_at_iso
             }
@@ -628,7 +627,6 @@ class AuthService:
                 "username": username,
                 "nickname": nickname,
                 "avatar_url": picture,
-                "provider": "google",
                 "created_at": created_at_iso,
                 "updated_at": created_at_iso
             }
