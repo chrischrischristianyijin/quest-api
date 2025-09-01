@@ -425,51 +425,115 @@ class AuthService:
             raise ValueError(f"Google登录回调处理失败: {str(e)}")
 
     async def google_token_login(self, id_token_str: str) -> dict:
-        """使用Google ID Token登录 - 使用Supabase原生支持"""
+        """使用Google ID Token登录 - 处理已存在用户"""
         try:
             self.logger.info("用户使用Google ID Token登录")
             
-            # 使用Supabase原生的sign_in_with_id_token方法
-            auth_response = self.supabase.auth.sign_in_with_id_token(
-                provider="google",
-                token=id_token_str
-            )
+            # 首先验证并解析Google ID Token获取用户信息
+            try:
+                id_info = id_token.verify_oauth2_token(
+                    id_token_str, 
+                    requests.Request(), 
+                    settings.GOOGLE_CLIENT_ID
+                )
+                
+                # 验证发行者
+                if id_info['iss'] not in ['accounts.google.com', 'https://accounts.google.com']:
+                    self.logger.error(f"无效的ID Token发行者: {id_info['iss']}")
+                    raise ValueError('无效的Google ID Token')
+                
+                email = id_info.get('email')
+                if not email:
+                    raise ValueError("Google ID Token中缺少邮箱信息")
+                
+                self.logger.info(f"Google ID Token验证成功: {email}")
+                
+            except ValueError as e:
+                self.logger.error(f"ID Token验证失败: {str(e)}")
+                raise ValueError(f"ID Token验证失败: {str(e)}")
             
-            if hasattr(auth_response, 'user') and auth_response.user:
-                user = auth_response.user
-                session = auth_response.session
-                
-                self.logger.info(f"✅ Google登录成功: {user.email}")
-                
-                # 确保用户有profile记录
-                await self._ensure_user_profile(user)
-                
-                # 获取用户profile信息
-                profile_query = self.supabase_service.table('profiles').select('*').eq('id', user.id).execute()
-                profile_data = profile_query.data[0] if profile_query.data else {}
-                
-                return {
-                    "success": True,
-                    "message": "Google登录成功",
-                    "data": {
-                        "user": {
-                            "id": user.id,
-                            "email": user.email,
-                            "username": profile_data.get('username', user.email.split('@')[0]),
-                            "nickname": profile_data.get('nickname', user.user_metadata.get('name', ''))
-                        },
-                        "access_token": session.access_token if session else None,
-                        "refresh_token": session.refresh_token if session else None,
-                        "token_type": "bearer"
-                    }
-                }
-            else:
-                self.logger.error("Supabase Google登录失败: 无用户信息")
-                raise ValueError("Google登录失败")
+            # 直接处理Google用户（不依赖Supabase的sign_in_with_id_token）
+            # 因为Python客户端的API可能与JS版本不同
+            self.logger.info(f"处理Google用户登录: {email}")
+            return await self._handle_existing_google_user(id_info)
                 
         except Exception as e:
             self.logger.error(f"Google ID Token登录失败: {str(e)}")
             raise ValueError(f"Google ID Token登录失败: {str(e)}")
+    
+    async def _handle_existing_google_user(self, id_info: dict) -> dict:
+        """处理已存在的Google用户（通过email/password注册）"""
+        try:
+            email = id_info.get('email')
+            name = id_info.get('name', '')
+            given_name = id_info.get('given_name', '')
+            picture = id_info.get('picture', '')
+            
+            self.logger.info(f"处理已存在的Google用户: {email}")
+            
+            # 查找现有的auth用户
+            try:
+                auth_response = self.supabase_service.auth.admin.get_user_by_email(email)
+                if auth_response and hasattr(auth_response, 'user') and auth_response.user:
+                    existing_user = auth_response.user
+                    self.logger.info(f"找到现有auth用户: {email}")
+                    
+                    # 更新用户的metadata，添加Google信息
+                    try:
+                        # 合并现有metadata和Google信息
+                        updated_metadata = existing_user.user_metadata or {}
+                        updated_metadata.update({
+                            "google_name": name,
+                            "google_picture": picture,
+                            "google_given_name": given_name,
+                            "google_provider": "true"
+                        })
+                        
+                        # 更新用户metadata
+                        self.supabase_service.auth.admin.update_user_by_id(
+                            existing_user.id,
+                            {"user_metadata": updated_metadata}
+                        )
+                        
+                        self.logger.info(f"已更新用户Google信息: {email}")
+                        
+                    except Exception as update_error:
+                        self.logger.warning(f"更新用户metadata失败: {update_error}")
+                    
+                    # 确保用户有profile记录
+                    await self._ensure_user_profile(existing_user)
+                    
+                    # 获取用户profile信息
+                    profile_query = self.supabase_service.table('profiles').select('*').eq('id', existing_user.id).execute()
+                    profile_data = profile_query.data[0] if profile_query.data else {}
+                    
+                    # 生成临时访问令牌
+                    access_token = f"google_existing_user_{existing_user.id}_{uuid.uuid4()}"
+                    
+                    return {
+                        "success": True,
+                        "message": "Google登录成功（已存在用户）",
+                        "data": {
+                            "user": {
+                                "id": existing_user.id,
+                                "email": existing_user.email,
+                                "username": profile_data.get('username', existing_user.email.split('@')[0]),
+                                "nickname": profile_data.get('nickname', name or given_name or '')
+                            },
+                            "access_token": access_token,
+                            "token_type": "bearer"
+                        }
+                    }
+                else:
+                    raise ValueError(f"无法找到邮箱对应的用户: {email}")
+                    
+            except Exception as lookup_error:
+                self.logger.error(f"查找现有用户失败: {lookup_error}")
+                raise ValueError(f"查找现有用户失败: {lookup_error}")
+                
+        except Exception as e:
+            self.logger.error(f"处理已存在Google用户失败: {str(e)}")
+            raise ValueError(f"处理已存在Google用户失败: {str(e)}")
     
     async def _ensure_user_profile(self, user) -> None:
         """确保用户有profile记录"""
