@@ -452,10 +452,59 @@ class AuthService:
                 self.logger.error(f"ID Token验证失败: {str(e)}")
                 raise ValueError(f"ID Token验证失败: {str(e)}")
             
-            # 直接处理Google用户（不依赖Supabase的sign_in_with_id_token）
-            # 因为Python客户端的API可能与JS版本不同
-            self.logger.info(f"处理Google用户登录: {email}")
-            return await self._handle_existing_google_user(id_info)
+            # 尝试使用Supabase原生的signInWithIdToken方法
+            try:
+                # 使用正确的方法名和参数格式
+                auth_response = self.supabase.auth.signInWithIdToken({
+                    'provider': 'google',
+                    'token': id_token_str
+                })
+                
+                if hasattr(auth_response, 'user') and auth_response.user:
+                    user = auth_response.user
+                    session = auth_response.session
+                    
+                    self.logger.info(f"✅ Supabase原生Google登录成功: {user.email}")
+                    
+                    # 确保用户有profile记录
+                    await self._ensure_user_profile(user)
+                    
+                    # 获取用户profile信息
+                    profile_query = self.supabase_service.table('profiles').select('*').eq('id', user.id).execute()
+                    profile_data = profile_query.data[0] if profile_query.data else {}
+                    
+                    return {
+                        "success": True,
+                        "message": "Google登录成功",
+                        "data": {
+                            "user": {
+                                "id": user.id,
+                                "email": user.email,
+                                "username": profile_data.get('username', user.email.split('@')[0]),
+                                "nickname": profile_data.get('nickname', user.user_metadata.get('name', ''))
+                            },
+                            "access_token": session.access_token if session else None,
+                            "refresh_token": session.refresh_token if session else None,
+                            "token_type": "bearer"
+                        }
+                    }
+                
+            except Exception as supabase_error:
+                error_message = str(supabase_error)
+                
+                # 如果错误是用户已存在，尝试手动处理现有用户
+                if "already been registered" in error_message or "user with this email" in error_message.lower():
+                    self.logger.info(f"用户已存在，尝试手动处理现有用户: {email}")
+                    return await self._handle_existing_google_user(id_info)
+                else:
+                    # 如果是方法名错误，回退到手动处理
+                    if "unexpected keyword argument" in error_message or "has no attribute" in error_message:
+                        self.logger.warning(f"Supabase Python客户端API不同，使用手动处理: {error_message}")
+                        return await self._handle_existing_google_user(id_info)
+                    else:
+                        # 其他错误，重新抛出
+                        self.logger.error(f"Supabase Google登录失败: {supabase_error}")
+                        raise ValueError(f"Google登录失败: {supabase_error}")
                 
         except Exception as e:
             self.logger.error(f"Google ID Token登录失败: {str(e)}")
@@ -473,7 +522,22 @@ class AuthService:
             
             # 查找现有的auth用户
             try:
-                auth_response = self.supabase_service.auth.admin.get_user_by_email(email)
+                # 尝试不同的方法名，适配Supabase Python客户端
+                auth_response = None
+                try:
+                    auth_response = self.supabase_service.auth.admin.get_user_by_email(email)
+                except AttributeError:
+                    # 如果方法不存在，尝试list用户并查找
+                    try:
+                        users_response = self.supabase_service.auth.admin.list_users()
+                        if users_response:
+                            for user in users_response:
+                                if hasattr(user, 'email') and user.email == email:
+                                    auth_response = type('obj', (object,), {'user': user})()
+                                    break
+                    except Exception as list_error:
+                        self.logger.error(f"list_users失败: {list_error}")
+                
                 if auth_response and hasattr(auth_response, 'user') and auth_response.user:
                     existing_user = auth_response.user
                     self.logger.info(f"找到现有auth用户: {email}")
@@ -490,10 +554,20 @@ class AuthService:
                         })
                         
                         # 更新用户metadata
-                        self.supabase_service.auth.admin.update_user_by_id(
-                            existing_user.id,
-                            {"user_metadata": updated_metadata}
-                        )
+                        try:
+                            self.supabase_service.auth.admin.update_user_by_id(
+                                existing_user.id,
+                                {"user_metadata": updated_metadata}
+                            )
+                        except AttributeError:
+                            # 如果方法不存在，尝试其他方法名
+                            try:
+                                self.supabase_service.auth.admin.update_user(
+                                    existing_user.id,
+                                    {"user_metadata": updated_metadata}
+                                )
+                            except Exception as update_error2:
+                                self.logger.warning(f"更新用户metadata失败(所有方法): {update_error2}")
                         
                         self.logger.info(f"已更新用户Google信息: {email}")
                         
