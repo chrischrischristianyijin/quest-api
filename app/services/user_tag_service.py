@@ -1,4 +1,4 @@
-from app.core.database import get_supabase_client
+from app.core.database import get_supabase_client, get_supabase_service
 from app.models.insight import UserTagCreate, UserTagUpdate, UserTagResponse
 from typing import Dict, Any, List, Optional
 import logging
@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 class UserTagService:
     def __init__(self):
         self.supabase = get_supabase_client()
+        self.supabase_service = get_supabase_service()
     
     async def get_user_tags(
         self,
@@ -101,8 +102,8 @@ class UserTagService:
                 "updated_at": current_time
             }
             
-            # 插入数据库
-            response = self.supabase.table("user_tags").insert(tag_data_to_insert).execute()
+            # 插入数据库（使用service role避免RLS问题）
+            response = self.supabase_service.table("user_tags").insert(tag_data_to_insert).execute()
             
             # 检查响应状态
             if hasattr(response, 'error') and response.error:
