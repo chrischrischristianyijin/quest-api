@@ -20,6 +20,7 @@ class UserTagService:
     ) -> Dict[str, Any]:
         """获取用户标签列表"""
         try:
+            # 使用service role客户端以确保Google登录用户也能正常访问
             query = self.supabase_service.table("user_tags").select("*")
             
             if user_id:
