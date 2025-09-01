@@ -338,16 +338,19 @@ class AuthService:
                 self.logger.error("Google OAuth配置不完整")
                 raise ValueError("Google OAuth配置不完整，请联系管理员")
             
-            # 构建Google OAuth授权URL
+            # 构建Google OAuth授权URL（兼容Chrome扩展）
             oauth_params = {
                 "client_id": settings.GOOGLE_CLIENT_ID,
                 "redirect_uri": settings.GOOGLE_REDIRECT_URI,
                 "scope": "openid email profile",
                 "response_type": "code",
-                "access_type": "offline",
-                "include_granted_scopes": "true",
                 "state": str(uuid.uuid4())  # 防止CSRF攻击
             }
+            
+            # 只在非Chrome扩展场景下添加这些参数
+            # Chrome扩展不支持这些参数
+            # oauth_params["access_type"] = "offline"
+            # oauth_params["include_granted_scopes"] = "true"
             
             oauth_url = f"https://accounts.google.com/o/oauth2/v2/auth?{urlencode(oauth_params)}"
             
