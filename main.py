@@ -60,6 +60,8 @@ app.include_router(insights.router, prefix="/api/v1/insights", tags=["见解"])
 app.include_router(user_tags.router, prefix="/api/v1/user-tags", tags=["用户标签"])
 app.include_router(metadata.router, prefix="/api/v1/metadata", tags=["元数据"])
 
+
+
 @app.get("/health")
 async def health_check():
     """健康检查端点"""
