@@ -293,14 +293,47 @@ class AuthService:
             self.logger.info("尝试获取当前用户信息")
             
             # 检查是否是Google登录生成的临时令牌
-            if token.startswith("google_existing_user_") or token.startswith("google_new_user_"):
+            if token.startswith("google_existing_user_") or token.startswith("google_new_user_") or token.startswith("google_auth_token_"):
                 self.logger.info("检测到Google登录令牌")
                 
                 # 解析令牌格式：google_existing_user_{user_id}_{uuid}
-                token_parts = token.split("_")
-                if len(token_parts) >= 4:
-                    user_id = token_parts[3]  # 提取user_id部分
-                    self.logger.info(f"从Google令牌提取用户ID: {user_id}")
+                # 更安全的解析方法：从后往前分割
+                if token.startswith("google_existing_user_"):
+                    # 移除前缀 "google_existing_user_"
+                    remaining = token[len("google_existing_user_"):]
+                    # 从右边分割最后一个 _ 来分离uuid
+                    user_part_and_uuid = remaining.rsplit("_", 1)
+                    if len(user_part_and_uuid) == 2:
+                        user_id = user_part_and_uuid[0]  # 用户ID部分
+                        self.logger.info(f"从Google existing user令牌提取用户ID: {user_id}")
+                    else:
+                        user_id = remaining
+                        self.logger.info(f"从Google existing user令牌提取用户ID(无uuid): {user_id}")
+                elif token.startswith("google_new_user_"):
+                    # 移除前缀 "google_new_user_"  
+                    remaining = token[len("google_new_user_"):]
+                    user_part_and_uuid = remaining.rsplit("_", 1)
+                    if len(user_part_and_uuid) == 2:
+                        user_id = user_part_and_uuid[0]
+                        self.logger.info(f"从Google new user令牌提取用户ID: {user_id}")
+                    else:
+                        user_id = remaining
+                        self.logger.info(f"从Google new user令牌提取用户ID(无uuid): {user_id}")
+                elif token.startswith("google_auth_token_"):
+                    # 移除前缀 "google_auth_token_"
+                    remaining = token[len("google_auth_token_"):]
+                    user_part_and_uuid = remaining.rsplit("_", 1)
+                    if len(user_part_and_uuid) == 2:
+                        user_id = user_part_and_uuid[0]
+                        self.logger.info(f"从Google auth token令牌提取用户ID: {user_id}")
+                    else:
+                        user_id = remaining
+                        self.logger.info(f"从Google auth token令牌提取用户ID(无uuid): {user_id}")
+                else:
+                    self.logger.warning("未知的Google令牌格式")
+                    raise ValueError("无效的Google令牌格式")
+                
+                if user_id:
                     
                     # 直接从数据库查询用户信息
                     try:
