@@ -20,7 +20,7 @@ class UserTagService:
     ) -> Dict[str, Any]:
         """获取用户标签列表"""
         try:
-            query = self.supabase.table("user_tags").select("*")
+            query = self.supabase_service.table("user_tags").select("*")
             
             if user_id:
                 query = query.eq("user_id", user_id)
@@ -42,7 +42,7 @@ class UserTagService:
             tags = response.data or []
             
             # 获取总数
-            count_query = self.supabase.table("user_tags").select("id", count="exact")
+            count_query = self.supabase_service.table("user_tags").select("id", count="exact")
             if user_id:
                 count_query = count_query.eq("user_id", user_id)
             
