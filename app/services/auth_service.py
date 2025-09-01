@@ -288,14 +288,65 @@ class AuthService:
             raise ValueError("登出失败")
 
     async def get_current_user(self, token: str) -> dict:
-        """获取当前用户信息"""
+        """获取当前用户信息 - 支持Google登录令牌"""
         try:
             self.logger.info("尝试获取当前用户信息")
             
+            # 检查是否是Google登录生成的临时令牌
+            if token.startswith("google_existing_user_") or token.startswith("google_new_user_"):
+                self.logger.info("检测到Google登录令牌")
+                
+                # 解析令牌格式：google_existing_user_{user_id}_{uuid}
+                token_parts = token.split("_")
+                if len(token_parts) >= 4:
+                    user_id = token_parts[3]  # 提取user_id部分
+                    self.logger.info(f"从Google令牌提取用户ID: {user_id}")
+                    
+                    # 直接从数据库查询用户信息
+                    try:
+                        # 先从auth.users查询
+                        users_response = self.supabase_service.auth.admin.list_users()
+                        users = []
+                        
+                        if users_response and hasattr(users_response, 'data'):
+                            users = users_response.data
+                        elif isinstance(users_response, list):
+                            users = users_response
+                        
+                        # 查找匹配的用户ID
+                        for user in users:
+                            user_id_db = user.get('id') if isinstance(user, dict) else getattr(user, 'id', None)
+                            if user_id_db == user_id:
+                                user_email = user.get('email') if isinstance(user, dict) else getattr(user, 'email', None)
+                                self.logger.info(f"✅ 通过Google令牌获取用户信息成功: {user_email}")
+                                return {
+                                    "id": user_id,
+                                    "email": user_email
+                                }
+                        
+                        # 如果没找到，查询profiles表
+                        profile_query = self.supabase_service.table('profiles').select('*').eq('id', user_id).execute()
+                        if profile_query.data:
+                            profile = profile_query.data[0]
+                            # 从profiles表我们只能获取有限信息，需要从用户ID推断email
+                            # 这里我们使用用户ID作为标识
+                            self.logger.info(f"✅ 通过profiles表获取用户信息成功: {user_id}")
+                            return {
+                                "id": user_id,
+                                "email": f"user_{user_id}@temp.com"  # 临时邮箱，实际应用中需要从auth.users获取
+                            }
+                        
+                    except Exception as db_error:
+                        self.logger.error(f"数据库查询用户失败: {db_error}")
+                
+                self.logger.warning("⚠️ Google令牌格式无效或用户不存在")
+                raise ValueError("无效的Google令牌")
+            
+            # 对于标准Supabase令牌，使用原有逻辑
             response = self.supabase.auth.get_user(token)
             
             if hasattr(response, 'user') and response.user:
-                self.logger.info(f"✅ 获取用户信息成功: {response.user.email}")
+                self.logger.info(f"✅ 获取Supabase用户信息成功: {response.user.email}")
                 return {
                     "id": response.user.id,
                     "email": response.user.email
