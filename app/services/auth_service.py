@@ -425,40 +425,81 @@ class AuthService:
             raise ValueError(f"Google登录回调处理失败: {str(e)}")
 
     async def google_token_login(self, id_token_str: str) -> dict:
-        """使用Google ID Token登录"""
+        """使用Google ID Token登录 - 使用Supabase原生支持"""
         try:
             self.logger.info("用户使用Google ID Token登录")
             
-            # 检查Google配置
-            if not settings.GOOGLE_CLIENT_ID:
-                self.logger.error("Google OAuth配置不完整")
-                raise ValueError("Google OAuth配置不完整")
+            # 使用Supabase原生的sign_in_with_id_token方法
+            auth_response = self.supabase.auth.sign_in_with_id_token(
+                provider="google",
+                token=id_token_str
+            )
             
-            # 验证ID Token
-            try:
-                id_info = id_token.verify_oauth2_token(
-                    id_token_str, 
-                    requests.Request(), 
-                    settings.GOOGLE_CLIENT_ID
-                )
+            if hasattr(auth_response, 'user') and auth_response.user:
+                user = auth_response.user
+                session = auth_response.session
                 
-                # 验证发行者
-                if id_info['iss'] not in ['accounts.google.com', 'https://accounts.google.com']:
-                    self.logger.error(f"无效的ID Token发行者: {id_info['iss']}")
-                    raise ValueError('无效的Google ID Token')
+                self.logger.info(f"✅ Google登录成功: {user.email}")
                 
-                self.logger.info(f"ID Token验证成功: {id_info.get('email')}")
+                # 确保用户有profile记录
+                await self._ensure_user_profile(user)
                 
-                # 创建或登录用户
-                return await self._handle_google_user(id_info, None)
+                # 获取用户profile信息
+                profile_query = self.supabase_service.table('profiles').select('*').eq('id', user.id).execute()
+                profile_data = profile_query.data[0] if profile_query.data else {}
                 
-            except ValueError as e:
-                self.logger.error(f"ID Token验证失败: {str(e)}")
-                raise ValueError(f"ID Token验证失败: {str(e)}")
-            
+                return {
+                    "success": True,
+                    "message": "Google登录成功",
+                    "data": {
+                        "user": {
+                            "id": user.id,
+                            "email": user.email,
+                            "username": profile_data.get('username', user.email.split('@')[0]),
+                            "nickname": profile_data.get('nickname', user.user_metadata.get('name', ''))
+                        },
+                        "access_token": session.access_token if session else None,
+                        "refresh_token": session.refresh_token if session else None,
+                        "token_type": "bearer"
+                    }
+                }
+            else:
+                self.logger.error("Supabase Google登录失败: 无用户信息")
+                raise ValueError("Google登录失败")
+                
         except Exception as e:
             self.logger.error(f"Google ID Token登录失败: {str(e)}")
             raise ValueError(f"Google ID Token登录失败: {str(e)}")
+    
+    async def _ensure_user_profile(self, user) -> None:
+        """确保用户有profile记录"""
+        try:
+            # 检查是否已有profile
+            profile_query = self.supabase_service.table('profiles').select('id').eq('id', user.id).execute()
+            
+            if not profile_query.data:
+                # 创建profile记录
+                username = self._generate_unique_username(user.email)
+                nickname = user.user_metadata.get('name', '') or user.user_metadata.get('given_name', '') or username
+                
+                profile_data = {
+                    "id": user.id,
+                    "username": username,
+                    "nickname": nickname,
+                    "avatar_url": user.user_metadata.get('picture', ''),
+                    "created_at": datetime.utcnow().isoformat(),
+                    "updated_at": datetime.utcnow().isoformat()
+                }
+                
+                self.supabase_service.table('profiles').insert(profile_data).execute()
+                self.logger.info(f"✅ 为Google用户创建profile: {user.email}")
+                
+                # 添加默认标签
+                await self.add_default_tags_for_user(user.id)
+                
+        except Exception as e:
+            self.logger.error(f"确保用户profile失败: {str(e)}")
+            # 不抛出错误，因为这不应该阻止登录
     
     async def _handle_google_user(self, user_info: dict, access_token: str = None) -> dict:
         """处理Google用户信息，创建或登录用户"""
