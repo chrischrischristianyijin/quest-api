@@ -497,14 +497,14 @@ class AuthService:
                     self.logger.info(f"用户已存在，尝试手动处理现有用户: {email}")
                     return await self._handle_existing_google_user(id_info)
                 else:
-                    # 如果是方法名错误，回退到手动处理
+                    # 如果是方法名错误或其他错误，回退到通用处理（支持新用户和已存在用户）
                     if "unexpected keyword argument" in error_message or "has no attribute" in error_message:
-                        self.logger.warning(f"Supabase Python客户端API不同，使用手动处理: {error_message}")
-                        return await self._handle_existing_google_user(id_info)
+                        self.logger.warning(f"Supabase Python客户端API不同，使用通用处理: {error_message}")
                     else:
-                        # 其他错误，重新抛出
-                        self.logger.error(f"Supabase Google登录失败: {supabase_error}")
-                        raise ValueError(f"Google登录失败: {supabase_error}")
+                        self.logger.warning(f"Supabase原生登录失败，使用通用处理: {supabase_error}")
+                    
+                    # 使用通用的Google用户处理方法（支持新用户创建）
+                    return await self._handle_google_user(id_info)
                 
         except Exception as e:
             self.logger.error(f"Google ID Token登录失败: {str(e)}")
