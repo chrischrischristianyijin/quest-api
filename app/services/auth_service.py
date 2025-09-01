@@ -522,30 +522,39 @@ class AuthService:
             
             # 查找现有的auth用户
             try:
-                # 尝试不同的方法名，适配Supabase Python客户端
-                auth_response = None
-                try:
-                    auth_response = self.supabase_service.auth.admin.get_user_by_email(email)
-                except AttributeError:
-                    # 如果方法不存在，尝试list用户并查找
-                    try:
-                        users_response = self.supabase_service.auth.admin.list_users()
-                        if users_response:
-                            for user in users_response:
-                                if hasattr(user, 'email') and user.email == email:
-                                    auth_response = type('obj', (object,), {'user': user})()
-                                    break
-                    except Exception as list_error:
-                        self.logger.error(f"list_users失败: {list_error}")
+                # 使用Supabase Python客户端的list_users方法
+                self.logger.info(f"开始查找现有用户: {email}")
+                users_response = self.supabase_service.auth.admin.list_users()
                 
-                if auth_response and hasattr(auth_response, 'user') and auth_response.user:
-                    existing_user = auth_response.user
+                existing_user = None
+                users = []
+                
+                if users_response and hasattr(users_response, 'data'):
+                    # 如果返回的是对象格式
+                    users = users_response.data
+                elif isinstance(users_response, list):
+                    # 如果直接返回列表
+                    users = users_response
+                else:
+                    users = []
+                
+                # 查找匹配的邮箱
+                self.logger.info(f"在{len(users)}个用户中查找: {email}")
+                for user in users:
+                    user_email = user.get('email') if isinstance(user, dict) else getattr(user, 'email', None)
+                    if user_email == email:
+                        existing_user = user
+                        self.logger.info(f"找到现有用户: {email}")
+                        break
+                
+                if existing_user:
                     self.logger.info(f"找到现有auth用户: {email}")
                     
                     # 更新用户的metadata，添加Google信息
                     try:
                         # 合并现有metadata和Google信息
-                        updated_metadata = existing_user.user_metadata or {}
+                        user_metadata = existing_user.get('user_metadata') if isinstance(existing_user, dict) else getattr(existing_user, 'user_metadata', {})
+                        updated_metadata = user_metadata or {}
                         updated_metadata.update({
                             "google_name": name,
                             "google_picture": picture,
@@ -553,17 +562,20 @@ class AuthService:
                             "google_provider": "true"
                         })
                         
+                        # 获取用户ID
+                        user_id = existing_user.get('id') if isinstance(existing_user, dict) else getattr(existing_user, 'id', None)
+                        
                         # 更新用户metadata
                         try:
                             self.supabase_service.auth.admin.update_user_by_id(
-                                existing_user.id,
+                                user_id,
                                 {"user_metadata": updated_metadata}
                             )
                         except AttributeError:
                             # 如果方法不存在，尝试其他方法名
                             try:
                                 self.supabase_service.auth.admin.update_user(
-                                    existing_user.id,
+                                    user_id,
                                     {"user_metadata": updated_metadata}
                                 )
                             except Exception as update_error2:
@@ -577,21 +589,25 @@ class AuthService:
                     # 确保用户有profile记录
                     await self._ensure_user_profile(existing_user)
                     
+                    # 获取用户ID和email
+                    user_id = existing_user.get('id') if isinstance(existing_user, dict) else getattr(existing_user, 'id', None)
+                    user_email = existing_user.get('email') if isinstance(existing_user, dict) else getattr(existing_user, 'email', None)
+                    
                     # 获取用户profile信息
-                    profile_query = self.supabase_service.table('profiles').select('*').eq('id', existing_user.id).execute()
+                    profile_query = self.supabase_service.table('profiles').select('*').eq('id', user_id).execute()
                     profile_data = profile_query.data[0] if profile_query.data else {}
                     
                     # 生成临时访问令牌
-                    access_token = f"google_existing_user_{existing_user.id}_{uuid.uuid4()}"
+                    access_token = f"google_existing_user_{user_id}_{uuid.uuid4()}"
                     
                     return {
                         "success": True,
                         "message": "Google登录成功（已存在用户）",
                         "data": {
                             "user": {
-                                "id": existing_user.id,
-                                "email": existing_user.email,
-                                "username": profile_data.get('username', existing_user.email.split('@')[0]),
+                                "id": user_id,
+                                "email": user_email,
+                                "username": profile_data.get('username', user_email.split('@')[0] if user_email else ''),
                                 "nickname": profile_data.get('nickname', name or given_name or '')
                             },
                             "access_token": access_token,
@@ -599,11 +615,14 @@ class AuthService:
                         }
                     }
                 else:
-                    raise ValueError(f"无法找到邮箱对应的用户: {email}")
+                    self.logger.info(f"未找到现有用户: {email}，将创建新用户")
+                    # 如果找不到现有用户，说明是新用户，应该创建新账户
+                    return await self._handle_google_user(id_info)
                     
             except Exception as lookup_error:
-                self.logger.error(f"查找现有用户失败: {lookup_error}")
-                raise ValueError(f"查找现有用户失败: {lookup_error}")
+                self.logger.warning(f"查找现有用户时出错: {lookup_error}，尝试创建新用户")
+                # 如果查找过程出错，也尝试创建新用户
+                return await self._handle_google_user(id_info)
                 
         except Exception as e:
             self.logger.error(f"处理已存在Google用户失败: {str(e)}")
