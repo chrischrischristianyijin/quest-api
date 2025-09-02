@@ -80,7 +80,7 @@ async def generate_summary(text: str) -> Optional[str]:
             "If the text is not natural language prose (e.g., code/logs/noise), summarize its topic or purpose. "
             "Always write the summary in the same language as the input."
         )
-        prompt_user = f"Summarize the following content in the same language as the input.\n\n{snippet}"
+        prompt_user = "Summarize the following content in the same language as the input."
 
         if provider == 'openai':
             api_key = os.getenv('OPENAI_API_KEY')
@@ -160,41 +160,6 @@ async def generate_summary(text: str) -> Optional[str]:
                 "keeping the same language as the input.\n\n" + combined
             )
             return await _call_once(final_prompt, model)
-            try:
-                async with httpx.AsyncClient(timeout=20.0) as client:
-                    try:
-                        resp = await client.post(f"{base_url}/chat/completions", json=payload, headers=headers)
-                        resp.raise_for_status()
-                    except httpx.HTTPStatusError as he:
-                        body = None
-                        try:
-                            body = he.response.text[:500]
-                        except Exception:
-                            body = None
-                        logger.warning(f"summary 请求失败：{he} body={body}")
-                        # 可选降级：尝试备用模型
-                        fb_model = os.getenv('SUMMARY_FALLBACK_MODEL')
-                        if fb_model and fb_model != model:
-                            payload['model'] = fb_model
-                            try:
-                                resp = await client.post(f"{base_url}/chat/completions", json=payload, headers=headers)
-                                resp.raise_for_status()
-                            except Exception:
-                                return None
-                        else:
-                            return None
-
-                    data = resp.json()
-                    choices = data.get('choices') or []
-                    if not choices:
-                        return None
-                    content = choices[0].get('message', {}).get('content')
-                    if content:
-                        return content.strip()
-                    return None
-            except Exception as e:
-                logger.warning(f'summary 请求失败：{e}')
-                return None
 
         # 其他 provider 可在此扩展
         return None
