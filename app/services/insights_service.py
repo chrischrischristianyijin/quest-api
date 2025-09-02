@@ -8,6 +8,7 @@ import logging
 import os
 from copy import deepcopy
 import asyncio
+from app.utils.summarize import generate_summary
 
 logger = logging.getLogger(__name__)
 
@@ -376,6 +377,29 @@ class InsightsService:
                 f" blocked={page.get('blocked_reason')}"
             )
 
+            # 生成摘要（可选，不阻塞失败）。若无正文，则回退使用 insight.description
+            summary_text = None
+            try:
+                source_text = page.get('text') or ''
+                if not source_text:
+                    try:
+                        desc_res = (
+                            get_supabase_service()
+                            .table('insights')
+                            .select('description')
+                            .eq('id', str(insight_id))
+                            .single()
+                            .execute()
+                        )
+                        if getattr(desc_res, 'data', None):
+                            source_text = (desc_res.data.get('description') or '').strip()
+                    except Exception:
+                        pass
+                if source_text:
+                    summary_text = await generate_summary(source_text)
+            except Exception as _sum_err:
+                logger.debug(f"summary 生成失败: {_sum_err}")
+
             content_payload = {
                 'insight_id': str(insight_id),
                 'user_id': str(user_id),
@@ -384,7 +408,8 @@ class InsightsService:
                 'text': page.get('text'),
                 'markdown': page.get('markdown'),
                 'content_type': page.get('content_type'),
-                'extracted_at': page.get('extracted_at')
+                'extracted_at': page.get('extracted_at'),
+                'summary': summary_text
             }
 
             def _sanitize_for_pg(obj: Any) -> Any:
