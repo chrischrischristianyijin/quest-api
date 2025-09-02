@@ -27,6 +27,24 @@ services:
       - key: GOOGLE_REDIRECT_URI
         value: https://your-app-name.onrender.com/api/v1/auth/google/callback
       # 注意：GOOGLE_CLIENT_SECRET 应该通过 Render Dashboard 手动配置以确保安全
+      # OpenAI API 配置 - 需要在 Render Dashboard 中设置实际值
+      - key: SUMMARY_ENABLED
+        value: true
+      - key: SUMMARY_PROVIDER
+        value: openai
+      - key: SUMMARY_MODEL
+        value: gpt-3.5-turbo
+      - key: SUMMARY_MAX_TOKENS
+        value: 220
+      - key: SUMMARY_INPUT_CHAR_LIMIT
+        value: 12000
+      - key: SUMMARY_CHUNK_CHAR_LIMIT
+        value: 4000
+      - key: SUMMARY_MAX_CHUNKS
+        value: 8
+      - key: SUMMARY_TEMPERATURE
+        value: 0.3
+      # OPENAI_API_KEY 和 OPENAI_BASE_URL 需要在 Render Dashboard 中手动配置
       - key: CURATOR_ENABLED
         value: true
       - key: CURATOR_PRIMARY
