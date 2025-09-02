@@ -87,6 +87,13 @@ async def generate_summary(text: str) -> Optional[str]:
             base_url = os.getenv('OPENAI_BASE_URL') or 'https://api.openai.com/v1'
             org = os.getenv('OPENAI_ORGANIZATION')
             project = os.getenv('OPENAI_PROJECT')
+            temp_env = os.getenv('SUMMARY_TEMPERATURE')
+            temp_value = None
+            try:
+                if temp_env is not None and temp_env != '':
+                    temp_value = float(temp_env)
+            except Exception:
+                temp_value = None
             if not api_key:
                 logger.debug('summary: OPENAI_API_KEY 未配置，跳过摘要')
                 return None
@@ -106,9 +113,10 @@ async def generate_summary(text: str) -> Optional[str]:
                         {'role': 'system', 'content': prompt_system},
                         {'role': 'user', 'content': f"{prompt_user}\n\n{snip}"},
                     ],
-                    'temperature': 0.3,
                     'max_completion_tokens': max_tokens,
                 }
+                if temp_value is not None:
+                    payload['temperature'] = temp_value
                 async with httpx.AsyncClient(timeout=20.0) as client:
                     try:
                         resp = await client.post(f"{base_url}/chat/completions", json=payload, headers=headers)
@@ -120,6 +128,20 @@ async def generate_summary(text: str) -> Optional[str]:
                         except Exception:
                             body = None
                         logger.warning(f"summary 请求失败：{he} body={body}")
+                        # temperature 不被支持时，移除后重试一次
+                        if body and 'temperature' in body:
+                            payload.pop('temperature', None)
+                            try:
+                                resp = await client.post(f"{base_url}/chat/completions", json=payload, headers=headers)
+                                resp.raise_for_status()
+                            except Exception:
+                                pass
+                            else:
+                                data = resp.json()
+                                choices = data.get('choices') or []
+                                if choices:
+                                    content = choices[0].get('message', {}).get('content')
+                                    return content.strip() if content else None
                         fb_model = os.getenv('SUMMARY_FALLBACK_MODEL')
                         if fb_model and fb_model != mdl:
                             try:
