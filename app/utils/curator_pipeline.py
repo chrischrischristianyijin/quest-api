@@ -42,31 +42,15 @@ def apply_curator(html: Optional[str], text: Optional[str]) -> Optional[Dict[str
             return None
 
         try:
-            from nemo_curator.cleaners import HTMLCleaner, TextCleaner, PIIRedactor  # type: ignore
+            from nemo_curator.cleaners import PIIRedactor  # type: ignore
             from nemo_curator.filters import HeuristicFilter, LanguageFilter, FastTextQualityClassifier  # type: ignore
             from nemo_curator.splitters import SentenceSplitter, TokenTextSplitter  # type: ignore
         except Exception as imp_err:
             logger.warning(f"NeMo Curator 未安装或不可用，将跳过清洗：{imp_err}")
             return None
 
-        # 构造文档
-        doc: Dict[str, Any] = {"id": "inline", "text": text or ''}
-
-        # 1) HTML → 正文（若提供）
-        if html:
-            try:
-                c1 = HTMLCleaner(remove_boilerplate=True, preserve_headings=True)
-                doc = c1.process({"id": "inline", "text": html})
-            except Exception as e:
-                logger.debug(f"HTMLCleaner 失败，回退到原文本: {e}")
-                doc = {"id": "inline", "text": text or ''}
-
-        # 2) 文本清理
-        try:
-            c2 = TextCleaner(normalize_unicode=True, fix_whitespace=True, collapse_urls=True)
-            doc = c2.process(doc)
-        except Exception as e:
-            logger.debug(f"TextCleaner 失败，使用原始文本: {e}")
+        # 源端已完成正文抽取与基础清洗；此处只做标准化后半段
+        doc: Dict[str, Any] = {"id": "inline", "text": (text or '')}
 
         # 2.5) 精确去重（段落级），可开关
         try:
@@ -151,6 +135,32 @@ def apply_curator(html: Optional[str], text: Optional[str]) -> Optional[Dict[str
                     seen_chunk_keys.add(key)
                     unique_chunks.append(ch)
                 chunks = unique_chunks
+            # 可选：MinHash 近重复去重（依赖 datasketch）
+            try:
+                if os.getenv('CURATOR_MINHASH_DEDUP', 'true').lower() in ('1', 'true', 'yes', 'on'):
+                    from datasketch import MinHash, MinHashLSH  # type: ignore
+                    def _shingles(s: str, k: int) -> List[str]:
+                        tokens = re.findall(r"\w+", s.lower())
+                        return [" ".join(tokens[i:i+k]) for i in range(max(0, len(tokens)-k+1))]
+                    k = int(_get_numbers('CURATOR_MINHASH_SHINGLE', 5))
+                    num_perm = int(_get_numbers('CURATOR_MINHASH_NUM_PERM', 128))
+                    threshold = float(_get_numbers('CURATOR_MINHASH_THRESHOLD', 0.8))
+                    lsh = MinHashLSH(threshold=threshold, num_perm=num_perm)
+                    kept_chunks: List[Dict[str, Any]] = []
+                    for idx, ch in enumerate(chunks):
+                        t = (ch.get('text') or '').strip()
+                        if not t:
+                            continue
+                        mh = MinHash(num_perm=num_perm)
+                        for sh in _shingles(t, k):
+                            mh.update(sh.encode('utf-8'))
+                        if lsh.query(mh):
+                            continue
+                        lsh.insert(f"ch_{idx}", mh)
+                        kept_chunks.append(ch)
+                    chunks = kept_chunks
+            except Exception as de:
+                logger.debug(f"MinHash 去重失败或依赖缺失：{de}")
         except Exception as e:
             logger.debug(f"分句/分块失败，使用清理后的整段文本: {e}")
             chunks = []

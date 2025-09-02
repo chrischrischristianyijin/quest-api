@@ -1,6 +1,6 @@
 from typing import Dict, Any, Optional, Callable
 from datetime import datetime
-from urllib.parse import urlparse, urljoin, parse_qs, unquote
+from urllib.parse import urlparse, urljoin, parse_qs, unquote, quote
 import os
 import os
 import httpx
@@ -49,6 +49,44 @@ async def extract_metadata_from_url(url: str) -> Dict[str, Any]:
     if cached and cached.get('parsed_meta') and not _cache_expired(cached.get('ts', 0)):
         _dbg(f"cache hit (ttl ok) url={url}")
         return cached['parsed_meta']
+
+    # 1.2) Wikipedia 专用：REST Summary 优先
+    try:
+        host = urlparse(url).netloc.lower()
+        if 'wikipedia.org' in host:
+            async with httpx.AsyncClient(timeout=8.0, proxies=_get_proxies()) as client:
+                # 将 /wiki/Title 提取出来
+                path = urlparse(url).path
+                title_part = path.split('/wiki/', 1)[1] if '/wiki/' in path else None
+                if title_part:
+                    lang = host.split('.')[0] if host.count('.') >= 2 else 'en'
+                    summary_api = f"https://{lang}.wikipedia.org/api/rest_v1/page/summary/{quote(title_part, safe='')}"
+                    resp = await _get_with_retries(client, summary_api)
+                    resp.raise_for_status()
+                    data = resp.json()
+                    title = data.get('title') or '无标题'
+                    description = (data.get('extract') or '')[:500]
+                    image_url = None
+                    if isinstance(data.get('thumbnail'), dict):
+                        image_url = data['thumbnail'].get('source')
+                    metadata = {
+                        'title': title,
+                        'description': description,
+                        'image_url': image_url,
+                        'url': url,
+                        'domain': host,
+                        'extracted_at': datetime.utcnow().isoformat(),
+                        'canonical_url': data.get('content_urls', {}).get('desktop', {}).get('page') or url,
+                        'site_name': 'Wikipedia',
+                        'keywords': None,
+                        'author': None,
+                        'published_at': None,
+                        'lang': lang,
+                        'content_language': lang
+                    }
+                    return metadata
+    except Exception:
+        pass
 
     # 1.5) 简化模式：只取 OG/Twitter+basic（通过环境变量启用）
     try:
@@ -147,6 +185,29 @@ async def extract_metadata_from_url(url: str) -> Dict[str, Any]:
             }
             _cache_set(url, response, metadata)
             _dbg(f"meta-only url={url} title_len={len(metadata['title'] or '')} desc_len={len(metadata['description'] or '')}")
+            # 若核心字段缺失，尝试 AMP 回退（CNN 等）
+            if (not metadata.get('title')) or (not metadata.get('image_url')):
+                try:
+                    amp_url = extract_amp_url(soup, url)
+                except Exception:
+                    amp_url = None
+                if amp_url and amp_url != url:
+                    try:
+                        amp_resp = await _get_with_retries(client, amp_url)
+                        amp_resp.raise_for_status()
+                        amp_soup = BeautifulSoup(amp_resp.text or '', 'html.parser')
+                        amp_title = extract_title(amp_soup) or metadata.get('title')
+                        amp_desc = extract_description(amp_soup) or metadata.get('description')
+                        amp_img = extract_image(amp_soup, amp_url) or metadata.get('image_url')
+                        metadata.update({
+                            'title': _clean_title(amp_title, extract_site_name(amp_soup), amp_url),
+                            'description': amp_desc,
+                            'image_url': amp_img,
+                            'canonical_url': extract_canonical_url(amp_soup, metadata.get('canonical_url') or url)
+                        })
+                    except Exception as amp_err:
+                        _dbg(f"amp fallback failed url={amp_url} err={amp_err}")
+
             return metadata
 
     except httpx.TimeoutException as e:
@@ -244,6 +305,24 @@ def extract_canonical_url(soup: BeautifulSoup, fallback_url: str) -> str:
     link = soup.find('link', rel=lambda r: r and 'canonical' in r)
     href = link.get('href') if link and link.has_attr('href') else None
     return href or fallback_url
+
+
+def extract_amp_url(soup: BeautifulSoup, fallback_url: str) -> Optional[str]:
+    try:
+        link = soup.find('link', rel=lambda r: r and ('amphtml' in r or 'AmpHTML' in r))
+        href = link.get('href') if link and link.has_attr('href') else None
+        if href:
+            return urljoin(fallback_url, href)
+        # 针对 CNN 的常见 AMP 形态
+        host = urlparse(fallback_url).netloc.lower()
+        path = urlparse(fallback_url).path or '/'
+        if 'cnn.com' in host:
+            # 优先 ?outputType=amp
+            sep = '&' if ('?' in fallback_url) else '?'
+            return fallback_url + f"{sep}outputType=amp"
+        return None
+    except Exception:
+        return None
 
 
 def extract_site_name(soup: BeautifulSoup) -> Optional[str]:
@@ -710,6 +789,37 @@ async def fetch_page_content(url: str) -> Dict[str, Any]:
             use_curator_primary = (os.getenv('CURATOR_PRIMARY', 'true').lower() in ('1', 'true', 'yes', 'on'))
 
             # 类型判断
+            # Wikipedia 专用：直接走 Action API plaintext，获取原文
+            host_lower = urlparse(url).netloc.lower()
+            if 'wikipedia.org' in host_lower:
+                try:
+                    path = urlparse(url).path
+                    title_part = path.split('/wiki/', 1)[1] if '/wiki/' in path else None
+                    lang = host_lower.split('.')[0] if host_lower.count('.') >= 2 else 'en'
+                    if title_part:
+                        api_plain = (
+                            f"https://{lang}.wikipedia.org/w/api.php?"
+                            f"action=query&prop=extracts&explaintext=1&format=json&titles="
+                            f"{quote(title_part, safe='')}"
+                        )
+                        r2 = await _get_with_retries(client, api_plain)
+                        r2.raise_for_status()
+                        data2 = r2.json() or {}
+                        pages = (data2.get('query') or {}).get('pages') or {}
+                        extracted_text = ''
+                        if isinstance(pages, dict):
+                            for _pid, page_obj in pages.items():
+                                if isinstance(page_obj, dict) and isinstance(page_obj.get('extract'), str):
+                                    extracted_text = page_obj.get('extract') or ''
+                                    break
+                        if extracted_text:
+                            max_len = int(os.getenv('PAGE_TEXT_MAX_LEN', '120000') or '120000')
+                            refined, rep = refine_extracted_text_with_report(extracted_text)
+                            text = _normalize_text(refined, max_len=max_len)
+                            refine_report = rep
+                except Exception:
+                    pass
+
             if ('text/html' in content_type) or (content_type.startswith('application/xhtml')) or (content_type == ''):
                 html = resp.text or None
                 if use_curator_primary:
@@ -857,6 +967,9 @@ async def fetch_page_content(url: str) -> Dict[str, Any]:
                     if refine_report is None:
                         refine_report = {}
                     refine_report['curation_info'] = curated.get('curation_info')
+
+            # 全局策略：不再返回 HTML 内容
+            html = None
 
             return {
                 'html': html,
