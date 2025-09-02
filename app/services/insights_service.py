@@ -9,7 +9,7 @@ import os
 from copy import deepcopy
 import asyncio
 from app.utils.summarize import generate_summary
-from datetime import datetime
+from datetime import datetime, date
 
 logger = logging.getLogger(__name__)
 
@@ -436,6 +436,10 @@ class InsightsService:
                     }
 
             # 4. 准备内容数据
+            # 4. 准备内容数据（统一规范时间字段为 ISO 字符串）
+            extracted_at_val = page.get('extracted_at')
+            if isinstance(extracted_at_val, (datetime, date)):
+                extracted_at_val = extracted_at_val.isoformat()
             content_payload = {
                 'insight_id': str(insight_id),
                 'user_id': str(user_id),
@@ -444,7 +448,7 @@ class InsightsService:
                 'text': page.get('text'),
                 'markdown': page.get('markdown'),
                 'content_type': page.get('content_type'),
-                'extracted_at': page.get('extracted_at'),
+                'extracted_at': extracted_at_val,
                 'summary': summary_text
             }
 
@@ -455,6 +459,8 @@ class InsightsService:
                         return None
                     if isinstance(obj, str):
                         return obj.replace('\x00', ' ').replace('\u0000', ' ')
+                    if isinstance(obj, (datetime, date)):
+                        return obj.isoformat()
                     if isinstance(obj, dict):
                         clean = {}
                         for k, v in obj.items():
