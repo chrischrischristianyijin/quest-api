@@ -365,11 +365,28 @@ class InsightsService:
 
     @staticmethod
     async def _fetch_and_save_content(insight_id: UUID, user_id: UUID, url: str) -> None:
-        """后台抓取并保存网页内容到 insight_contents 表。
+        """完整的 insight 内容处理 pipeline。
+
+        流程：
+        1. 检查缓存中是否有摘要
+        2. 如果没有，抓取页面内容
+        3. 生成摘要（如果缓存中没有）
+        4. 保存到 insight_contents 表
+        5. 更新缓存状态
 
         不抛出异常，所有错误仅记录日志。
         """
         try:
+            logger.info(f"开始处理 insight 内容 pipeline: {url}")
+            
+            # 1. 检查缓存中是否有摘要
+            from app.routers.metadata import summary_cache
+            cached_summary = None
+            if url in summary_cache and summary_cache[url]['status'] == 'completed':
+                cached_summary = summary_cache[url]['summary']
+                logger.info(f"找到缓存的摘要: {url}")
+            
+            # 2. 抓取页面内容（无论是否有缓存摘要都需要）
             page = await fetch_page_content(url)
             logger.info(
                 f"抓取页面内容完成：status={page.get('status_code')}, ct={page.get('content_type')},"
@@ -377,29 +394,47 @@ class InsightsService:
                 f" blocked={page.get('blocked_reason')}"
             )
 
-            # 生成摘要（可选，不阻塞失败）。若无正文，则回退使用 insight.description
-            summary_text = None
-            try:
-                source_text = page.get('text') or ''
-                if not source_text:
-                    try:
-                        desc_res = (
-                            get_supabase_service()
-                            .table('insights')
-                            .select('description')
-                            .eq('id', str(insight_id))
-                            .single()
-                            .execute()
-                        )
-                        if getattr(desc_res, 'data', None):
-                            source_text = (desc_res.data.get('description') or '').strip()
-                    except Exception:
-                        pass
-                if source_text:
-                    summary_text = await generate_summary(source_text)
-            except Exception as _sum_err:
-                logger.debug(f"summary 生成失败: {_sum_err}")
+            # 3. 生成摘要（如果缓存中没有）
+            summary_text = cached_summary
+            if not summary_text:
+                try:
+                    source_text = page.get('text') or ''
+                    if not source_text:
+                        try:
+                            desc_res = (
+                                get_supabase_service()
+                                .table('insights')
+                                .select('description')
+                                .eq('id', str(insight_id))
+                                .single()
+                                .execute()
+                            )
+                            if getattr(desc_res, 'data', None):
+                                source_text = (desc_res.data.get('description') or '').strip()
+                        except Exception:
+                            pass
+                    if source_text:
+                        summary_text = await generate_summary(source_text)
+                        logger.info(f"生成新的摘要: {url}")
+                        
+                        # 更新缓存
+                        summary_cache[url] = {
+                            'status': 'completed',
+                            'created_at': datetime.now(),
+                            'summary': summary_text,
+                            'error': None
+                        }
+                except Exception as _sum_err:
+                    logger.debug(f"summary 生成失败: {_sum_err}")
+                    # 更新缓存状态为失败
+                    summary_cache[url] = {
+                        'status': 'failed',
+                        'created_at': datetime.now(),
+                        'summary': None,
+                        'error': str(_sum_err)
+                    }
 
+            # 4. 准备内容数据
             content_payload = {
                 'insight_id': str(insight_id),
                 'user_id': str(user_id),
@@ -412,6 +447,7 @@ class InsightsService:
                 'summary': summary_text
             }
 
+            # 5. 数据清理
             def _sanitize_for_pg(obj: Any) -> Any:
                 try:
                     if obj is None:
@@ -431,6 +467,7 @@ class InsightsService:
 
             safe_payload = _sanitize_for_pg(deepcopy(content_payload))
 
+            # 6. 保存到数据库
             supabase_service = get_supabase_service()
             content_res = (
                 supabase_service
@@ -441,9 +478,20 @@ class InsightsService:
             if hasattr(content_res, 'error') and content_res.error:
                 logger.warning(f"保存 insight_contents 失败: {content_res.error}")
             else:
-                logger.info("insight_contents 保存成功")
+                logger.info(f"insight_contents 保存成功: {url}")
+                
         except Exception as content_err:
             logger.warning(f"后台保存网页内容失败（不影响主流程）: {content_err}")
+            # 更新缓存状态为失败
+            try:
+                summary_cache[url] = {
+                    'status': 'failed',
+                    'created_at': datetime.now(),
+                    'summary': None,
+                    'error': str(content_err)
+                }
+            except Exception:
+                pass
     
     @staticmethod
     async def update_insight(insight_id: UUID, insight_data: InsightUpdate, user_id: UUID) -> Dict[str, Any]:

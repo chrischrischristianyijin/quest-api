@@ -3,7 +3,7 @@ from fastapi import APIRouter, HTTPException, Depends, status, Form, BackgroundT
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from app.services.auth_service import AuthService
-from app.core.database import get_supabase
+from app.core.database import get_supabase, get_supabase_service
 from typing import Dict, Any, Optional
 import logging
 import asyncio
@@ -24,7 +24,7 @@ router = APIRouter(tags=["元数据"])
 security = HTTPBearer()
 
 async def generate_summary_background(url: str, metadata: Dict[str, Any]):
-    """后台异步生成摘要"""
+    """后台异步生成摘要并缓存"""
     try:
         logger.info(f"开始为 URL {url} 生成摘要")
         
@@ -48,15 +48,17 @@ async def generate_summary_background(url: str, metadata: Dict[str, Any]):
             # 生成摘要
             summary = await generate_summary(text_content)
             if summary:
-                # 存储摘要到缓存
+                # 更新缓存
                 summary_cache[url] = {
                     'status': 'completed',
                     'created_at': datetime.now(),
                     'summary': summary,
                     'error': None
                 }
+                
                 logger.info(f"URL {url} 摘要生成成功: {summary[:100]}...")
             else:
+                # 更新失败状态
                 summary_cache[url] = {
                     'status': 'failed',
                     'created_at': datetime.now(),
@@ -65,6 +67,7 @@ async def generate_summary_background(url: str, metadata: Dict[str, Any]):
                 }
                 logger.warning(f"URL {url} 摘要生成失败")
         else:
+            # 更新失败状态
             summary_cache[url] = {
                 'status': 'failed',
                 'created_at': datetime.now(),
@@ -107,7 +110,7 @@ async def extract_webpage_metadata(
     url: str = Form(..., description="要提取元数据的网页URL"),
     background_tasks: BackgroundTasks = None
 ):
-    """提取网页元数据 - 仅提取，不创建insight，后台异步生成摘要"""
+    """提取网页元数据 - 后台异步生成摘要并缓存"""
     try:
         # 验证URL格式
         if not utils_is_valid_url(url):
