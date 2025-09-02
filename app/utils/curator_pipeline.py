@@ -46,7 +46,13 @@ def apply_curator(html: Optional[str], text: Optional[str]) -> Optional[Dict[str
             from nemo_curator.filters import HeuristicFilter, LanguageFilter, FastTextQualityClassifier  # type: ignore
             from nemo_curator.splitters import SentenceSplitter, TokenTextSplitter  # type: ignore
         except Exception as imp_err:
-            logger.warning(f"NeMo Curator 未安装或不可用，将跳过清洗：{imp_err}")
+            try:
+                if (os.getenv('CURATOR_STRICT', '').lower() in ('1', 'true', 'yes', 'on')):
+                    logger.warning(f"NeMo Curator 未安装或不可用，将跳过清洗：{imp_err}")
+                else:
+                    logger.debug(f"NeMo Curator 未安装或不可用（已静默跳过）：{imp_err}")
+            except Exception:
+                pass
             return None
 
         # 源端已完成正文抽取与基础清洗；此处只做标准化后半段

@@ -14,6 +14,8 @@ import logging
 import re
 import unicodedata
 from typing import Tuple
+import gzip
+import bz2
 from app.utils.curator_pipeline import apply_curator
 
 try:
@@ -788,6 +790,24 @@ async def fetch_page_content(url: str) -> Dict[str, Any]:
             refine_report: Optional[Dict[str, Any]] = None
             use_curator_primary = (os.getenv('CURATOR_PRIMARY', 'true').lower() in ('1', 'true', 'yes', 'on'))
 
+            # 防乱码/二进制：若声明 text/* 但 body 看起来像压缩或二进制，尝试解压后再解码
+            try:
+                raw_bytes = resp.content or b''
+                safe_bytes = _maybe_decompress(raw_bytes)
+                header_charset = None
+                if 'charset=' in content_type:
+                    try:
+                        header_charset = content_type.split('charset=')[-1].split(';')[0].strip()
+                    except Exception:
+                        header_charset = None
+                if (content_type.startswith('text/') or 'html' in content_type):
+                    as_text, used = _decode_bytes_safely(safe_bytes, header_charset)
+                    resp_text_override = as_text
+                else:
+                    resp_text_override = None
+            except Exception:
+                resp_text_override = None
+
             # 类型判断
             # Wikipedia 专用：直接走 Action API plaintext，获取原文
             host_lower = urlparse(url).netloc.lower()
@@ -821,7 +841,7 @@ async def fetch_page_content(url: str) -> Dict[str, Any]:
                     pass
 
             if ('text/html' in content_type) or (content_type.startswith('application/xhtml')) or (content_type == ''):
-                html = resp.text or None
+                html = (resp_text_override if resp_text_override is not None else resp.text) or None
                 if use_curator_primary:
                     try:
                         curated = apply_curator(html=html, text=None)
@@ -887,7 +907,7 @@ async def fetch_page_content(url: str) -> Dict[str, Any]:
                             text = None
             elif content_type.startswith('text/'):
                 # 纯文本资源
-                raw_text = (resp.text or '')[:50000]
+                raw_text = ((resp_text_override if resp_text_override is not None else resp.text) or '')[:50000]
                 if use_curator_primary:
                     try:
                         curated = apply_curator(html=None, text=raw_text)
@@ -1081,6 +1101,144 @@ def _get_proxies() -> Optional[Dict[str, str]]:
     return proxies or None
 
 
+
+# -------------------- 内容探测与解压/二进制判定 --------------------
+def _looks_binary(buf: bytes, sample: int = 2048) -> bool:
+    try:
+        s = buf[:sample] if buf else b''
+        if not s:
+            return False
+        nontext = 0
+        for ch in s:
+            # 常见控制字符且非 \n/\r/\t
+            if ch == 0x00 or (ch < 9) or (13 < ch < 32):
+                nontext += 1
+        return (nontext / max(1, len(s))) > 0.3
+    except Exception:
+        return False
+
+
+def _maybe_decompress(buf: bytes) -> bytes:
+    try:
+        if not buf:
+            return buf
+        if buf.startswith(b"\x1f\x8b"):
+            try:
+                return gzip.decompress(buf)
+            except Exception:
+                return buf
+        if buf.startswith(b"BZh"):
+            try:
+                return bz2.decompress(buf)
+            except Exception:
+                return buf
+        # 尝试 brotli（若环境可用且可解压）
+        try:
+            import brotli  # type: ignore
+            try:
+                return brotli.decompress(buf)
+            except Exception:
+                pass
+        except Exception:
+            pass
+        return buf
+    except Exception:
+        return buf
+
+
+def _extract_charset_from_meta(html_snippet: str) -> Optional[str]:
+    try:
+        m = re.search(r'<meta[^>]+charset\s*=\s*(["\']?)([^\s"\'>/;]+)\1', html_snippet, re.I)
+        if m:
+            return m.group(2).strip()
+        m2 = re.search(r'<meta[^>]+http-equiv\s*=\s*(["\']?)content-type\1[^>]*content\s*=\s*(["\'])([^\2]+?)\2', html_snippet, re.I)
+        if m2:
+            ct = m2.group(3)
+            m3 = re.search(r'charset\s*=\s*([^\s;]+)', ct, re.I)
+            if m3:
+                return m3.group(1).strip()
+        return None
+    except Exception:
+        return None
+
+
+def _replacement_ratio(s: str) -> float:
+    try:
+        if not s:
+            return 0.0
+        bad = s.count('\uFFFD')
+        return bad / max(1, len(s))
+    except Exception:
+        return 0.0
+
+
+def _decode_bytes_safely(buf: bytes, header_charset: Optional[str] = None) -> tuple[str, str]:
+    """鲁棒解码：报头→meta→charset-normalizer→chardet→常见编码回退。返回 (text, encoding)。"""
+    tried: set[str] = set()
+    # 报头
+    if header_charset:
+        enc = header_charset.strip().lower()
+        try:
+            txt = buf.decode(enc, errors='replace')
+            if _replacement_ratio(txt) < 0.02:
+                return txt, enc
+            tried.add(enc)
+        except Exception:
+            tried.add(enc)
+    # meta
+    try:
+        head = buf[:4096].decode('latin-1', errors='ignore')
+        meta_enc = _extract_charset_from_meta(head)
+        if meta_enc and meta_enc.lower() not in tried:
+            try:
+                txt = buf.decode(meta_enc, errors='replace')
+                if _replacement_ratio(txt) < 0.02:
+                    return txt, meta_enc
+                tried.add(meta_enc.lower())
+            except Exception:
+                tried.add(meta_enc.lower())
+    except Exception:
+        pass
+    # charset-normalizer
+    try:
+        from charset_normalizer import from_bytes  # type: ignore
+        res = from_bytes(buf).best()
+        if res and res.encoding and res.encoding.lower() not in tried:
+            enc = res.encoding
+            try:
+                txt = buf.decode(enc, errors='replace')
+                if _replacement_ratio(txt) < 0.03:
+                    return txt, enc
+                tried.add(enc.lower())
+            except Exception:
+                tried.add(enc.lower())
+    except Exception:
+        pass
+    # chardet
+    try:
+        import chardet  # type: ignore
+        det = chardet.detect(buf)
+        enc = (det.get('encoding') or '').lower()
+        if enc and enc not in tried:
+            try:
+                txt = buf.decode(enc, errors='replace')
+                if _replacement_ratio(txt) < 0.04:
+                    return txt, enc
+                tried.add(enc)
+            except Exception:
+                tried.add(enc)
+    except Exception:
+        pass
+    # 常见回退
+    for enc in ['utf-8', 'gb18030', 'latin-1']:
+        if enc in tried:
+            continue
+        try:
+            txt = buf.decode(enc, errors='replace')
+            return txt, enc
+        except Exception:
+            continue
+    return (buf.decode('utf-8', errors='replace'), 'utf-8')
 
 # -------------------- API 优先：oEmbed / JSON-LD / RSS / 适配器 --------------------
 
