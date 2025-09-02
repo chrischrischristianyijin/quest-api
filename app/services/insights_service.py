@@ -7,6 +7,7 @@ from app.utils.metadata import fetch_page_content
 import logging
 import os
 from copy import deepcopy
+import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -273,55 +274,16 @@ class InsightsService:
             # 可选：抓取并保存网页内容（HTML与纯文本） - 默认关闭
             if os.getenv('FETCH_PAGE_CONTENT_ENABLED', '').lower() in ('1', 'true', 'yes'):
                 try:
-                    page = await fetch_page_content(insight_data.url)
-                    logger.info(
-                        f"抓取页面内容完成：status={page.get('status_code')}, ct={page.get('content_type')},"
-                        f" html={'Y' if page.get('html') else 'N'}, text_len={len(page.get('text') or '')},"
-                        f" blocked={page.get('blocked_reason')}"
+                    # 后台抓取与保存，不阻塞创建流程
+                    asyncio.create_task(
+                        InsightsService._fetch_and_save_content(
+                            insight_id=insight_id,
+                            user_id=user_id,
+                            url=insight_data.url
+                        )
                     )
-                    # 写入独立表 insight_contents（推荐）
-                    content_payload = {
-                        'insight_id': str(insight_id),
-                        'user_id': str(user_id),
-                        'url': insight_data.url,
-                        'html': page.get('html'),
-                        'text': page.get('text'),
-                        'markdown': page.get('markdown'),
-                        'content_type': page.get('content_type'),
-                        'extracted_at': page.get('extracted_at')
-                    }
-
-                    def _sanitize_for_pg(obj: Any) -> Any:
-                        try:
-                            if obj is None:
-                                return None
-                            if isinstance(obj, str):
-                                return obj.replace('\x00', ' ').replace('\u0000', ' ')
-                            if isinstance(obj, dict):
-                                clean = {}
-                                for k, v in obj.items():
-                                    clean[k] = _sanitize_for_pg(v)
-                                return clean
-                            if isinstance(obj, list):
-                                return [_sanitize_for_pg(v) for v in obj]
-                            return obj
-                        except Exception:
-                            return obj
-
-                    safe_payload = _sanitize_for_pg(deepcopy(content_payload))
-
-                    content_res = (
-                        supabase_service
-                        .table('insight_contents')
-                        .insert(safe_payload)
-                        .execute()
-                    )
-                    if hasattr(content_res, 'error') and content_res.error:
-                        logger.warning(f"保存 insight_contents 失败: {content_res.error}")
-                    else:
-                        logger.info("insight_contents 保存成功")
                 except Exception as content_err:
-                    logger.warning(f"保存网页内容失败（不影响主流程）: {content_err}")
+                    logger.warning(f"调度网页内容后台抓取失败（不影响主流程）: {content_err}")
             else:
                 logger.info("FETCH_PAGE_CONTENT_ENABLED 未开启，跳过全文抓取与保存")
             
@@ -399,6 +361,64 @@ class InsightsService:
         except Exception as e:
             logger.error(f"创建insight失败: {str(e)}")
             return {"success": False, "message": f"创建insight失败: {str(e)}"}
+
+    @staticmethod
+    async def _fetch_and_save_content(insight_id: UUID, user_id: UUID, url: str) -> None:
+        """后台抓取并保存网页内容到 insight_contents 表。
+
+        不抛出异常，所有错误仅记录日志。
+        """
+        try:
+            page = await fetch_page_content(url)
+            logger.info(
+                f"抓取页面内容完成：status={page.get('status_code')}, ct={page.get('content_type')},"
+                f" html={'Y' if page.get('html') else 'N'}, text_len={len(page.get('text') or '')},"
+                f" blocked={page.get('blocked_reason')}"
+            )
+
+            content_payload = {
+                'insight_id': str(insight_id),
+                'user_id': str(user_id),
+                'url': url,
+                'html': page.get('html'),
+                'text': page.get('text'),
+                'markdown': page.get('markdown'),
+                'content_type': page.get('content_type'),
+                'extracted_at': page.get('extracted_at')
+            }
+
+            def _sanitize_for_pg(obj: Any) -> Any:
+                try:
+                    if obj is None:
+                        return None
+                    if isinstance(obj, str):
+                        return obj.replace('\x00', ' ').replace('\u0000', ' ')
+                    if isinstance(obj, dict):
+                        clean = {}
+                        for k, v in obj.items():
+                            clean[k] = _sanitize_for_pg(v)
+                        return clean
+                    if isinstance(obj, list):
+                        return [_sanitize_for_pg(v) for v in obj]
+                    return obj
+                except Exception:
+                    return obj
+
+            safe_payload = _sanitize_for_pg(deepcopy(content_payload))
+
+            supabase_service = get_supabase_service()
+            content_res = (
+                supabase_service
+                .table('insight_contents')
+                .insert(safe_payload)
+                .execute()
+            )
+            if hasattr(content_res, 'error') and content_res.error:
+                logger.warning(f"保存 insight_contents 失败: {content_res.error}")
+            else:
+                logger.info("insight_contents 保存成功")
+        except Exception as content_err:
+            logger.warning(f"后台保存网页内容失败（不影响主流程）: {content_err}")
     
     @staticmethod
     async def update_insight(insight_id: UUID, insight_data: InsightUpdate, user_id: UUID) -> Dict[str, Any]:

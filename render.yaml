@@ -27,5 +27,27 @@ services:
       - key: GOOGLE_REDIRECT_URI
         value: https://your-app-name.onrender.com/api/v1/auth/google/callback
       # 注意：GOOGLE_CLIENT_SECRET 应该通过 Render Dashboard 手动配置以确保安全
+      - key: CURATOR_ENABLED
+        value: true
+      - key: CURATOR_PRIMARY
+        value: true
+      - key: CURATOR_LANGS
+        value: zh,en
+      - key: CURATOR_EXACT_DEDUP
+        value: true
+      - key: CURATOR_QUALITY_THRESHOLD
+        value: 0.5
+      - key: CURATOR_MIN_CHARS
+        value: 200
+      - key: CURATOR_MAX_CHARS
+        value: 120000
+      - key: CURATOR_MAX_URL_DENSITY
+        value: 0.15
+      - key: CURATOR_MAX_REPEAT_CHAR_RATIO
+        value: 0.2
+      - key: CURATOR_USE_PII_REDACTOR
+        value: false
+      - key: CURATOR_TOKENIZER
+        value: bert-base-multilingual-cased
     autoDeploy: true
     branch: main

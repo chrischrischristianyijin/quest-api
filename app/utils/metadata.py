@@ -14,6 +14,7 @@ import logging
 import re
 import unicodedata
 from typing import Tuple
+from app.utils.curator_pipeline import apply_curator
 
 try:
     from youtube_transcript_api import YouTubeTranscriptApi
@@ -706,63 +707,95 @@ async def fetch_page_content(url: str) -> Dict[str, Any]:
             text: Optional[str] = None
             blocked_reason: Optional[str] = None
             refine_report: Optional[Dict[str, Any]] = None
+            use_curator_primary = (os.getenv('CURATOR_PRIMARY', 'true').lower() in ('1', 'true', 'yes', 'on'))
 
             # 类型判断
             if ('text/html' in content_type) or (content_type.startswith('application/xhtml')) or (content_type == ''):
                 html = resp.text or None
-                # 优先 Readability 提取
-                article_html: Optional[str] = None
-                try:
-                    doc = Document(html or '')
-                    article_html = doc.summary()  # 主体HTML
-                except Exception:
-                    article_html = None
-
-                if article_html:
+                if use_curator_primary:
                     try:
-                        # 先做净化，再提纯文本
-                        cleaned_html = _sanitize_html(article_html)
-                        article_soup = BeautifulSoup(cleaned_html, 'html.parser')
-                        extracted_text = article_soup.get_text('\n', strip=True)
-                        if extracted_text:
-                            max_len = int(os.getenv('PAGE_TEXT_MAX_LEN', '120000') or '120000')
-                            # 先做段落级清洗（脚注/断词/图注等），再统一规范化
-                            refined, rep = refine_extracted_text_with_report(extracted_text)
-                            text = _normalize_text(refined, max_len=max_len)
-                            refine_report = rep
-                        # 返回净化后的HTML
-                        html = cleaned_html
+                        curated = apply_curator(html=html, text=None)
                     except Exception:
-                        text = None
+                        curated = None
+                    if curated and (curated.get('curated_text') or '').strip() != '':
+                        text = curated.get('curated_text')
+                        refine_report = (refine_report or {})
+                        refine_report['curation_info'] = curated.get('curation_info')
+                    else:
+                        # Curator 未产出内容时，作为最后的兜底，做极简提取
+                        try:
+                            soup = BeautifulSoup(html or '', 'html.parser')
+                            for tag in soup(['script', 'style', 'noscript']):
+                                tag.decompose()
+                            extracted_text = soup.get_text('\n', strip=True)
+                            max_len = int(os.getenv('PAGE_TEXT_MAX_LEN', '120000') or '120000')
+                            text = _normalize_text(extracted_text, max_len=max_len)
+                        except Exception:
+                            text = None
                 else:
-                    # 回退：简单主体提取
+                    # 旧路径（保留回退）：Readability → 净化 → 规范化
+                    article_html: Optional[str] = None
                     try:
-                        soup = BeautifulSoup(html or '', 'html.parser')
-                        for tag in soup(['script', 'style', 'noscript']):
-                            tag.decompose()
-                        main = soup.find('article') or soup.find(attrs={'role': 'main'}) or soup.find(id='main')
-                        target = main if main else soup.body or soup
-                        cleaned_html = _sanitize_html(str(target))
-                        target_soup = BeautifulSoup(cleaned_html, 'html.parser')
-                        extracted_text = target_soup.get_text(separator='\n', strip=True)
-                        if extracted_text:
-                            max_len = int(os.getenv('PAGE_TEXT_MAX_LEN', '120000') or '120000')
-                            refined, rep = refine_extracted_text_with_report(extracted_text)
-                            text = _normalize_text(refined, max_len=max_len)
-                            refine_report = rep
-                        html = cleaned_html
-                        # 粗略检测被拦截场景（Cloudflare/反爬）
-                        page_title = (soup.title.string or '').strip() if soup.title and soup.title.string else ''
-                        if 'Just a moment' in page_title or 'Cloudflare' in page_title or 'cf-challenge' in (html or '') or 'Attention Required!' in page_title:
-                            blocked_reason = 'cloudflare_challenge'
+                        doc = Document(html or '')
+                        article_html = doc.summary()
                     except Exception:
-                        text = None
+                        article_html = None
+
+                    if article_html:
+                        try:
+                            cleaned_html = _sanitize_html(article_html)
+                            article_soup = BeautifulSoup(cleaned_html, 'html.parser')
+                            extracted_text = article_soup.get_text('\n', strip=True)
+                            if extracted_text:
+                                max_len = int(os.getenv('PAGE_TEXT_MAX_LEN', '120000') or '120000')
+                                refined, rep = refine_extracted_text_with_report(extracted_text)
+                                text = _normalize_text(refined, max_len=max_len)
+                                refine_report = rep
+                            html = cleaned_html
+                        except Exception:
+                            text = None
+                    else:
+                        try:
+                            soup = BeautifulSoup(html or '', 'html.parser')
+                            for tag in soup(['script', 'style', 'noscript']):
+                                tag.decompose()
+                            main = soup.find('article') or soup.find(attrs={'role': 'main'}) or soup.find(id='main')
+                            target = main if main else soup.body or soup
+                            cleaned_html = _sanitize_html(str(target))
+                            target_soup = BeautifulSoup(cleaned_html, 'html.parser')
+                            extracted_text = target_soup.get_text(separator='\n', strip=True)
+                            if extracted_text:
+                                max_len = int(os.getenv('PAGE_TEXT_MAX_LEN', '120000') or '120000')
+                                refined, rep = refine_extracted_text_with_report(extracted_text)
+                                text = _normalize_text(refined, max_len=max_len)
+                                refine_report = rep
+                            html = cleaned_html
+                            page_title = (soup.title.string or '').strip() if soup.title and soup.title.string else ''
+                            if 'Just a moment' in page_title or 'Cloudflare' in page_title or 'cf-challenge' in (html or '') or 'Attention Required!' in page_title:
+                                blocked_reason = 'cloudflare_challenge'
+                        except Exception:
+                            text = None
             elif content_type.startswith('text/'):
                 # 纯文本资源
                 raw_text = (resp.text or '')[:50000]
-                refined, rep = refine_extracted_text_with_report(raw_text)
-                text = _normalize_text(refined, max_len=int(os.getenv('PAGE_TEXT_MAX_LEN', '120000') or '120000'))
-                refine_report = rep
+                if use_curator_primary:
+                    try:
+                        curated = apply_curator(html=None, text=raw_text)
+                    except Exception:
+                        curated = None
+                    if curated and (curated.get('curated_text') or '').strip() != '':
+                        text = curated.get('curated_text')
+                        refine_report = (refine_report or {})
+                        refine_report['curation_info'] = curated.get('curation_info')
+                    else:
+                        max_len = int(os.getenv('PAGE_TEXT_MAX_LEN', '120000') or '120000')
+                        refined, rep = refine_extracted_text_with_report(raw_text)
+                        text = _normalize_text(refined, max_len=max_len)
+                        refine_report = rep
+                else:
+                    refined, rep = refine_extracted_text_with_report(raw_text)
+                    text = _normalize_text(refined, max_len=int(os.getenv('PAGE_TEXT_MAX_LEN', '120000') or '120000'))
+                    refine_report = rep
                 html = None
             else:
                 # PDF: application/pdf 或 URL 以 .pdf 结尾
@@ -812,6 +845,18 @@ async def fetch_page_content(url: str) -> Dict[str, Any]:
                         _dbg("yt transcript api not installed")
             except Exception as yt_exc:
                 _dbg(f"yt transcript error: {yt_exc}")
+
+            # 末尾兜底：若未启用主清洗或前面未产出内容，再尝试一次 Curator
+            if not use_curator_primary:
+                try:
+                    curated = apply_curator(html=html, text=text)
+                except Exception:
+                    curated = None
+                if curated and (curated.get('curated_text') or '').strip() != '':
+                    text = curated.get('curated_text')
+                    if refine_report is None:
+                        refine_report = {}
+                    refine_report['curation_info'] = curated.get('curation_info')
 
             return {
                 'html': html,
