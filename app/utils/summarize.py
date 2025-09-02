@@ -107,7 +107,7 @@ async def generate_summary(text: str) -> Optional[str]:
                         {'role': 'user', 'content': f"{prompt_user}\n\n{snip}"},
                     ],
                     'temperature': 0.3,
-                    'max_tokens': max_tokens,
+                    'max_completion_tokens': max_tokens,
                 }
                 async with httpx.AsyncClient(timeout=20.0) as client:
                     try:
