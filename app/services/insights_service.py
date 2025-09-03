@@ -493,6 +493,34 @@ class InsightsService:
             else:
                 logger.info(f"insight_contents 保存成功: {url}")
                 
+                # 6.1 保存后回读校验，如 summary 为空且我们本地有 summary_text，则进行一次回填更新
+                try:
+                    check_res = (
+                        supabase_service
+                        .table('insight_contents')
+                        .select('id, summary')
+                        .eq('insight_id', str(insight_id))
+                        .order('created_at', desc=True)
+                        .limit(1)
+                        .execute()
+                    )
+                    row = check_res.data[0] if getattr(check_res, 'data', None) else None
+                    db_summary = row.get('summary') if row else None
+                    if summary_text and not db_summary and row and row.get('id'):
+                        upd = (
+                            supabase_service
+                            .table('insight_contents')
+                            .update({'summary': summary_text})
+                            .eq('id', row['id'])
+                            .execute()
+                        )
+                        if hasattr(upd, 'error') and upd.error:
+                            logger.warning(f"insight_contents 回填 summary 失败: {upd.error}")
+                        else:
+                            logger.info("insight_contents 回填 summary 成功")
+                except Exception as verify_err:
+                    logger.warning(f"insight_contents 回读/回填校验失败: {verify_err}")
+                
         except Exception as content_err:
             logger.warning(f"后台保存网页内容失败（不影响主流程）: {content_err}")
             # 更新缓存状态为失败
