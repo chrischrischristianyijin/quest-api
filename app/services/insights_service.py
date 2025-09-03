@@ -452,6 +452,12 @@ class InsightsService:
                 'summary': summary_text
             }
 
+            # 记录摘要长度，便于排查是否为空
+            try:
+                logger.info(f"即将写入 insight_contents.summary 长度: {len(summary_text) if summary_text else 0}")
+            except Exception:
+                pass
+
             # 5. 数据清理
             def _sanitize_for_pg(obj: Any) -> Any:
                 try:
