@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends, status, Query
+from fastapi import APIRouter, HTTPException, Depends, status, Query, Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from app.services.insights_service import InsightsService
 from app.services.auth_service import AuthService
@@ -82,6 +82,54 @@ async def get_all_user_insights(
         return result
     except Exception as e:
         logger.error(f"获取用户所有见解失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/sync/incremental")
+async def get_insights_incremental(
+    response: Response,
+    since: Optional[str] = Query(None, description="上次同步时间戳 (ISO 格式)"),
+    etag: Optional[str] = Query(None, description="上次响应的 ETag"),
+    limit: int = Query(50, ge=1, le=100, description="每次获取数量"),
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """增量获取见解（只返回变动的数据）"""
+    try:
+        auth_service = AuthService()
+        current_user = await auth_service.get_current_user(credentials.credentials)
+        
+        logger.info(f"用户 {current_user['id']} 请求增量insights，since={since}, etag={etag}")
+        
+        insights_service = InsightsService()
+        result = await insights_service.get_insights_incremental(
+            user_id=UUID(current_user["id"]),
+            since=since,
+            etag=etag,
+            limit=limit
+        )
+        
+        if not result.get("success"):
+            # 特殊处理 304 Not Modified
+            if result.get("not_modified"):
+                response.status_code = 304
+                if result.get("etag"):
+                    response.headers["ETag"] = result["etag"]
+                return {"not_modified": True}
+            
+            logger.warning(f"增量获取insights失败: {result.get('message')}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=result.get("message", "增量获取insights失败")
+            )
+        
+        # 设置缓存头
+        if result.get("data", {}).get("etag"):
+            response.headers["ETag"] = result["data"]["etag"]
+            response.headers["Cache-Control"] = "private, must-revalidate"
+        
+        logger.info(f"用户 {current_user['id']} 成功获取增量insights")
+        return result
+    except Exception as e:
+        logger.error(f"增量获取见解失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/{insight_id}")

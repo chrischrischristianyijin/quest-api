@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 import uvicorn
@@ -52,6 +53,10 @@ app.add_middleware(
     TrustedHostMiddleware,
     allowed_hosts=["*"]  # 生产环境应该限制具体域名
 )
+
+# 添加 GZIP 压缩中间件（提升传输效率）
+if os.getenv('ENABLE_GZIP_COMPRESSION', 'true').lower() in ('true', '1', 'yes'):
+    app.add_middleware(GZipMiddleware, minimum_size=1000)  # 大于1KB的响应才压缩
 
 # 注册路由
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["认证"])

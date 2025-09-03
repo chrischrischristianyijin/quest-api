@@ -70,17 +70,42 @@ class InsightTagService:
     
     @staticmethod
     async def get_tags_by_insight_ids(insight_ids: List[UUID], user_id: UUID) -> dict:
-        """批量获取多个insight的标签（优化版本）"""
+        """批量获取多个insight的标签（优化版本，支持分批处理）"""
         try:
             supabase = get_supabase()
             
             if not insight_ids:
                 return {"success": True, "data": {}}
             
-            # 性能优化：限制批量查询的数量，避免超大查询
-            if len(insight_ids) > 500:
-                logger.warning(f"批量获取标签数量过大 ({len(insight_ids)})，建议分批处理")
+            # 性能优化：大批量数据自动分批处理
+            BATCH_SIZE = 200  # 每批处理200个
+            all_tags_by_insight = {}
             
+            if len(insight_ids) > BATCH_SIZE:
+                logger.info(f"大批量标签查询 ({len(insight_ids)})，自动分批处理")
+                
+                # 分批处理
+                for i in range(0, len(insight_ids), BATCH_SIZE):
+                    batch_ids = insight_ids[i:i + BATCH_SIZE]
+                    batch_result = await InsightTagService._get_tags_batch(batch_ids, user_id, supabase)
+                    if batch_result.get('success'):
+                        all_tags_by_insight.update(batch_result.get('data', {}))
+                    else:
+                        logger.warning(f"批次 {i//BATCH_SIZE + 1} 标签查询失败")
+                
+                return {"success": True, "data": all_tags_by_insight}
+            else:
+                # 单批处理
+                return await InsightTagService._get_tags_batch(insight_ids, user_id, supabase)
+            
+        except Exception as e:
+            logger.error(f"批量获取insight标签失败: {str(e)}")
+            return {"success": False, "message": f"获取标签失败: {str(e)}"}
+    
+    @staticmethod
+    async def _get_tags_batch(insight_ids: List[UUID], user_id: UUID, supabase) -> dict:
+        """单批次获取标签（内部方法）"""
+        try:
             # 转换为字符串列表，减少重复转换
             insight_id_strings = [str(id) for id in insight_ids]
             
@@ -111,7 +136,7 @@ class InsightTagService:
             return {"success": True, "data": tags_by_insight}
             
         except Exception as e:
-            logger.error(f"批量获取insight标签失败: {str(e)}")
+            logger.error(f"单批次获取标签失败: {str(e)}")
             return {"success": False, "message": f"获取标签失败: {str(e)}"}
     
     @staticmethod

@@ -11,8 +11,39 @@ import asyncio
 from app.utils.summarize import generate_summary
 from datetime import datetime, date
 import re
+import hashlib
+import json
+from functools import lru_cache
+import time
 
 logger = logging.getLogger(__name__)
+
+# 简单的内存缓存，用于减少重复查询
+_query_cache = {}
+_cache_ttl = 30  # 30秒缓存
+
+def _cache_key(func_name: str, *args, **kwargs) -> str:
+    """生成缓存键"""
+    key_parts = [func_name] + [str(arg) for arg in args] + [f"{k}={v}" for k, v in sorted(kwargs.items())]
+    return hashlib.md5("|".join(key_parts).encode()).hexdigest()
+
+def _get_cache(key: str):
+    """获取缓存"""
+    if key in _query_cache:
+        cached_data, timestamp = _query_cache[key]
+        if time.time() - timestamp < _cache_ttl:
+            return cached_data
+        else:
+            del _query_cache[key]
+    return None
+
+def _set_cache(key: str, data):
+    """设置缓存"""
+    _query_cache[key] = (data, time.time())
+    # 简单的缓存清理：保持最多100个缓存项
+    if len(_query_cache) > 100:
+        oldest_key = min(_query_cache.keys(), key=lambda k: _query_cache[k][1])
+        del _query_cache[oldest_key]
 
 class InsightsService:
     """Insights服务类"""
@@ -74,9 +105,17 @@ class InsightsService:
             count_response = count_query.execute()
             total = count_response.count if hasattr(count_response, 'count') else len(insights)
             
-            # 批量获取标签
-            insight_ids = [UUID(insight['id']) for insight in insights]
-            tags_result = await InsightTagService.get_tags_by_insight_ids(insight_ids, user_id)
+            # 优化：使用缓存减少重复标签查询
+            cache_key = _cache_key("user_tags", str(user_id))
+            cached_tags = _get_cache(cache_key)
+            
+            if cached_tags is None and insights:
+                # 批量获取标签
+                insight_ids = [UUID(insight['id']) for insight in insights]
+                tags_result = await InsightTagService.get_tags_by_insight_ids(insight_ids, user_id)
+                _set_cache(cache_key, tags_result)
+            else:
+                tags_result = cached_tags or {"success": True, "data": {}}
             
             # 构建响应数据 - 优化版本，避免重复 UUID 转换
             insight_responses = []
@@ -137,8 +176,10 @@ class InsightsService:
             
             logger.info(f"查询用户 {query_user_id} 的所有insights，当前用户: {user_id}")
             
-            # 构建查询
-            query = supabase.table('insights').select('*').eq('user_id', query_user_id)
+            # 构建查询 - 只选择必要字段，避免传输大量数据
+            query = supabase.table('insights').select(
+                'id, title, description, url, image_url, created_at, updated_at'
+            ).eq('user_id', query_user_id)
             
             # 添加搜索条件
             if search:
@@ -198,6 +239,106 @@ class InsightsService:
         except Exception as e:
             logger.error(f"获取所有insights失败: {str(e)}")
             return {"success": False, "message": f"获取所有insights失败: {str(e)}"}
+    
+    @staticmethod
+    async def get_insights_incremental(
+        user_id: UUID,
+        since: Optional[str] = None,
+        etag: Optional[str] = None,
+        limit: int = 50
+    ) -> Dict[str, Any]:
+        """增量获取用户insights（只返回变动的数据）- 新接口"""
+        try:
+            supabase = get_supabase()
+            
+            logger.info(f"增量查询用户 {user_id} 的insights，since={since}, etag={etag}")
+            
+            # 构建基础查询 - 只选择必要字段
+            query = supabase.table('insights').select(
+                'id, title, description, url, image_url, created_at, updated_at'
+            ).eq('user_id', str(user_id))
+            
+            # 时间过滤：只获取指定时间之后的数据
+            if since:
+                try:
+                    # 解析时间戳（支持多种格式）
+                    if since.endswith('Z'):
+                        since_dt = datetime.fromisoformat(since.replace('Z', '+00:00'))
+                    else:
+                        since_dt = datetime.fromisoformat(since)
+                    
+                    query = query.gte('updated_at', since_dt.isoformat())
+                    logger.info(f"过滤时间: {since_dt}")
+                except Exception as time_err:
+                    logger.warning(f"时间格式解析失败: {time_err}")
+                    return {"success": False, "message": "时间格式错误"}
+            
+            # 添加排序和限制
+            query = query.order('updated_at', desc=True).limit(limit)
+            
+            # 执行查询
+            response = query.execute()
+            
+            if hasattr(response, 'error') and response.error:
+                logger.error(f"增量获取insights失败: {response.error}")
+                return {"success": False, "message": "增量获取insights失败"}
+            
+            insights = response.data or []
+            logger.info(f"增量查询获取 {len(insights)} 条insights")
+            
+            # 生成数据指纹用于 ETag 缓存
+            data_hash = _generate_etag(insights)
+            
+            # ETag 检查：如果数据没有变化，返回 304
+            if etag and etag == data_hash and insights:
+                logger.info("数据未变化，返回 304 Not Modified")
+                return {
+                    "success": True,
+                    "not_modified": True,
+                    "etag": data_hash
+                }
+            
+            # 批量获取标签
+            insight_responses = []
+            if insights:
+                insight_ids = [UUID(insight['id']) for insight in insights]
+                tags_result = await InsightTagService.get_tags_by_insight_ids(insight_ids, user_id)
+                
+                # 构建响应数据
+                for insight in insights:
+                    insight_tags = tags_result.get('data', {}).get(insight['id'], [])
+                    
+                    insight_response = {
+                        "id": insight['id'],
+                        "user_id": str(user_id),
+                        "title": insight['title'],
+                        "description": insight['description'],
+                        "url": insight.get('url'),
+                        "image_url": insight.get('image_url'),
+                        "created_at": insight['created_at'],
+                        "updated_at": insight['updated_at'],
+                        "tags": insight_tags
+                    }
+                    insight_responses.append(insight_response)
+            
+            # 计算是否还有更多数据
+            has_more = len(insights) >= limit
+            last_updated = insights[0]['updated_at'] if insights else datetime.utcnow().isoformat()
+            
+            return {
+                "success": True,
+                "data": {
+                    "insights": insight_responses,
+                    "has_more": has_more,
+                    "last_updated": last_updated,
+                    "etag": data_hash,
+                    "count": len(insight_responses)
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"增量获取insights失败: {str(e)}")
+            return {"success": False, "message": f"增量获取insights失败: {str(e)}"}
     
     @staticmethod
     async def get_insight(insight_id: UUID, user_id: UUID) -> Dict[str, Any]:
@@ -562,6 +703,25 @@ class InsightsService:
                 pass
         finally:
             logger.info(f"[后台任务] 内容处理任务结束: insight_id={insight_id}, url={url}")
+
+
+def _generate_etag(insights: list) -> str:
+    """生成数据的 ETag 指纹"""
+    try:
+        # 创建数据指纹：基于 ID 和更新时间
+        fingerprint_data = []
+        for insight in insights:
+            fingerprint_data.append({
+                'id': insight.get('id'),
+                'updated_at': insight.get('updated_at')
+            })
+        
+        # 生成 MD5 哈希
+        data_str = json.dumps(fingerprint_data, sort_keys=True, default=str)
+        return hashlib.md5(data_str.encode()).hexdigest()
+    except Exception:
+        # 如果生成失败，返回基于时间的简单哈希
+        return hashlib.md5(str(datetime.utcnow()).encode()).hexdigest()
     
     @staticmethod
     async def update_insight(insight_id: UUID, insight_data: InsightUpdate, user_id: UUID) -> Dict[str, Any]:

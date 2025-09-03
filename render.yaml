@@ -70,5 +70,11 @@ services:
       # 性能优化配置
       - key: MAX_INSIGHTS_LIMIT
         value: 1000
+      - key: ENABLE_GZIP_COMPRESSION
+        value: true
+      - key: QUERY_CACHE_TTL
+        value: 30
+      - key: BATCH_SIZE_LIMIT
+        value: 200
     autoDeploy: true
     branch: main
