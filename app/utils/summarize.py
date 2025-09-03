@@ -156,9 +156,16 @@ async def generate_summary(text: str) -> Optional[str]:
                     if not choices:
                         logger.warning('summary: choices 为空')
                         return None
-                    content = choices[0].get('message', {}).get('content')
+                    message = choices[0].get('message', {})
+                    # 打印 message 结构与预览，帮助排查 content 为空的原因
+                    try:
+                        msg_preview = str(message)[:400]
+                        logger.info(f"summary: message keys={list(message.keys())}, preview={msg_preview}")
+                    except Exception:
+                        pass
+                    content = message.get('content')
                     content_out = content.strip() if content else None
-                    logger.info(f"summary: 调用成功，返回长度={len(content_out) if content_out else 0}")
+                    logger.info(f"summary: 调用成功，返回长度={len(content_out) if content_out else 0}, preview={(content_out[:200] if content_out else '')}")
                     return content_out
 
             # Map-Reduce 摘要：过长文本分块 → 分块摘要 → 汇总摘要
