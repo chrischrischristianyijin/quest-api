@@ -33,7 +33,7 @@ services:
       - key: SUMMARY_PROVIDER
         value: openai
       - key: SUMMARY_MODEL
-        value: gpt-5-nano
+        value: gpt-4o-mini
       - key: SUMMARY_MAX_TOKENS
         value: 1200
       - key: SUMMARY_INPUT_CHAR_LIMIT

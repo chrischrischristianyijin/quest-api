@@ -20,7 +20,7 @@ async def generate_summary(text: str) -> Optional[str]:
     环境变量：
     - SUMMARY_ENABLED: 开关
     - SUMMARY_PROVIDER: 默认 'openai'
-    - SUMMARY_MODEL: 默认 'gpt-5-nano'（可替换为兼容模型）
+    - SUMMARY_MODEL: 默认 'gpt-4o-mini'（可替换为兼容模型）
     - OPENAI_API_KEY / OPENAI_BASE_URL: 兼容 OpenAI 风格接口
     - SUMMARY_MAX_TOKENS: 输出上限（默认 1200）
     - SUMMARY_INPUT_CHAR_LIMIT: 输入截断（默认 16000）
@@ -33,7 +33,7 @@ async def generate_summary(text: str) -> Optional[str]:
             return None
 
         provider = (os.getenv('SUMMARY_PROVIDER') or 'openai').lower()
-        model = os.getenv('SUMMARY_MODEL') or 'gpt-5-nano'
+        model = os.getenv('SUMMARY_MODEL') or 'gpt-4o-mini'
         max_tokens = int(os.getenv('SUMMARY_MAX_TOKENS', '1200') or '1200')
         input_limit = int(os.getenv('SUMMARY_INPUT_CHAR_LIMIT', '16000') or '16000')
         chunk_limit = int(os.getenv('SUMMARY_CHUNK_CHAR_LIMIT', '4000') or '4000')
