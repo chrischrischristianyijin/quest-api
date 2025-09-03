@@ -70,34 +70,42 @@ class InsightTagService:
     
     @staticmethod
     async def get_tags_by_insight_ids(insight_ids: List[UUID], user_id: UUID) -> dict:
-        """批量获取多个insight的标签"""
+        """批量获取多个insight的标签（优化版本）"""
         try:
             supabase = get_supabase()
             
             if not insight_ids:
                 return {"success": True, "data": {}}
             
-            # 获取所有相关insight的标签
+            # 性能优化：限制批量查询的数量，避免超大查询
+            if len(insight_ids) > 500:
+                logger.warning(f"批量获取标签数量过大 ({len(insight_ids)})，建议分批处理")
+            
+            # 转换为字符串列表，减少重复转换
+            insight_id_strings = [str(id) for id in insight_ids]
+            
+            # 获取所有相关insight的标签 - 优化查询，只选择必要字段
             response = supabase.table('insight_tags').select(
-                'insight_id, tag_id, user_tags(name, color)'
-            ).in_('insight_id', [str(id) for id in insight_ids]).execute()
+                'insight_id, user_tags!inner(id, name, color)'
+            ).in_('insight_id', insight_id_strings).eq('user_id', str(user_id)).execute()
             
             if hasattr(response, 'error') and response.error:
                 logger.error(f"批量获取insight标签失败: {response.error}")
                 return {"success": False, "message": "获取标签失败"}
             
-            # 按insight_id分组标签
+            # 按insight_id分组标签 - 优化数据结构构建
             tags_by_insight = {}
-            for item in response.data:
+            for item in response.data or []:
                 insight_id = item['insight_id']
                 if insight_id not in tags_by_insight:
                     tags_by_insight[insight_id] = []
                 
                 if item.get('user_tags'):
+                    tag_data = item['user_tags']
                     tags_by_insight[insight_id].append({
-                        'tag_id': item['tag_id'],
-                        'name': item['user_tags']['name'],
-                        'color': item['user_tags']['color']
+                        'id': tag_data['id'],
+                        'name': tag_data['name'],
+                        'color': tag_data['color']
                     })
             
             return {"success": True, "data": tags_by_insight}

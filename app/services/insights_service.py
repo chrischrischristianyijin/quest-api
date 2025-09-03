@@ -44,8 +44,10 @@ class InsightsService:
             
             logger.info(f"查询用户 {query_user_id} 的insights，当前用户: {user_id}")
             
-            # 构建查询
-            query = supabase.table('insights').select('*').eq('user_id', query_user_id)
+            # 构建查询 - 只选择必要字段，避免传输大量数据
+            query = supabase.table('insights').select(
+                'id, title, description, url, image_url, created_at, updated_at'
+            ).eq('user_id', query_user_id)
             
             # 添加搜索条件
             if search:
@@ -76,23 +78,22 @@ class InsightsService:
             insight_ids = [UUID(insight['id']) for insight in insights]
             tags_result = await InsightTagService.get_tags_by_insight_ids(insight_ids, user_id)
             
-            # 构建响应数据
+            # 构建响应数据 - 优化版本，避免重复 UUID 转换
             insight_responses = []
             for insight in insights:
                 insight_tags = tags_result.get('data', {}).get(insight['id'], [])
                 
-                insight_response = InsightResponse(
-                    id=UUID(insight['id']),
-                    user_id=UUID(insight['user_id']),
-                    title=insight['title'],
-                    description=insight['description'],
-                    url=insight.get('url'),
-                    image_url=insight.get('image_url'),
-                    meta=insight.get('meta'),
-                    created_at=insight['created_at'],
-                    updated_at=insight['updated_at'],
-                    tags=insight_tags
-                )
+                insight_response = {
+                    "id": insight['id'],
+                    "user_id": query_user_id,  # 直接使用查询的 user_id
+                    "title": insight['title'],
+                    "description": insight['description'],
+                    "url": insight.get('url'),
+                    "image_url": insight.get('image_url'),
+                    "created_at": insight['created_at'],
+                    "updated_at": insight['updated_at'],
+                    "tags": insight_tags
+                }
                 insight_responses.append(insight_response)
             
             return {
@@ -143,8 +144,12 @@ class InsightsService:
             if search:
                 query = query.or_(f'title.ilike.%{search}%,description.ilike.%{search}%')
             
-            # 添加排序
+            # 添加排序和限制（避免一次性获取过多数据）
             query = query.order('created_at', desc=True)
+            
+            # 性能保护：如果是获取所有数据，限制最大数量
+            MAX_INSIGHTS_LIMIT = int(os.getenv('MAX_INSIGHTS_LIMIT', '1000'))
+            query = query.limit(MAX_INSIGHTS_LIMIT)
             
             # 执行查询
             response = query.execute()
@@ -156,27 +161,32 @@ class InsightsService:
             insights = response.data or []
             logger.info(f"成功获取 {len(insights)} 条insights")
             
-            # 批量获取标签
-            insight_ids = [UUID(insight['id']) for insight in insights]
-            tags_result = await InsightTagService.get_tags_by_insight_ids(insight_ids, user_id)
+            # 优化：如果 insights 数量很大，考虑分批处理标签
+            if len(insights) > 100:
+                logger.warning(f"用户 {query_user_id} 有大量 insights ({len(insights)})，可能影响性能")
             
-            # 构建响应数据
+            # 批量获取标签 - 优化版本
             insight_responses = []
-            for insight in insights:
-                insight_tags = tags_result.get('data', {}).get(insight['id'], [])
+            if insights:
+                insight_ids = [UUID(insight['id']) for insight in insights]
+                tags_result = await InsightTagService.get_tags_by_insight_ids(insight_ids, user_id)
                 
-                insight_response = InsightResponse(
-                    id=UUID(insight['id']),
-                    user_id=UUID(insight['user_id']),
-                    title=insight['title'],
-                    description=insight['description'],
-                    url=insight.get('url'),
-                    image_url=insight.get('image_url'),
-                    created_at=insight['created_at'],
-                    updated_at=insight['updated_at'],
-                    tags=insight_tags
-                )
-                insight_responses.append(insight_response)
+                # 构建响应数据
+                for insight in insights:
+                    insight_tags = tags_result.get('data', {}).get(insight['id'], [])
+                    
+                    insight_response = {
+                        "id": insight['id'],
+                        "user_id": query_user_id,  # 直接使用查询的 user_id，避免重复转换
+                        "title": insight['title'],
+                        "description": insight['description'],
+                        "url": insight.get('url'),
+                        "image_url": insight.get('image_url'),
+                        "created_at": insight['created_at'],
+                        "updated_at": insight['updated_at'],
+                        "tags": insight_tags
+                    }
+                    insight_responses.append(insight_response)
             
             return {
                 "success": True,
