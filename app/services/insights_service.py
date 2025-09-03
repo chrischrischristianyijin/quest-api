@@ -274,18 +274,19 @@ class InsightsService:
             logger.info(f"insight 创建成功: id={insight.get('id')}, user_id={insight.get('user_id')}")
             insight_id = UUID(insight['id'])
 
-            # 抓取并保存网页内容（改为同步执行，便于排查问题）
+            # 启动异步后台任务处理内容抓取和摘要生成
             if os.getenv('FETCH_PAGE_CONTENT_ENABLED', '').lower() in ('1', 'true', 'yes'):
                 try:
-                    logger.info("开始同步执行内容处理 pipeline（临时关闭异步）")
-                    await InsightsService._fetch_and_save_content(
+                    import asyncio
+                    # 创建后台任务，不等待完成
+                    asyncio.create_task(InsightsService._fetch_and_save_content(
                         insight_id=insight_id,
                         user_id=user_id,
                         url=insight_data.url
-                    )
-                    logger.info("同步内容处理完成")
-                except Exception as content_err:
-                    logger.warning(f"同步执行内容处理失败: {content_err}")
+                    ))
+                    logger.info("已启动异步内容处理 pipeline 后台任务")
+                except Exception as task_err:
+                    logger.warning(f"启动异步内容处理任务失败: {task_err}")
             else:
                 logger.info("FETCH_PAGE_CONTENT_ENABLED 未开启，跳过全文抓取与保存")
             
@@ -366,7 +367,7 @@ class InsightsService:
 
     @staticmethod
     async def _fetch_and_save_content(insight_id: UUID, user_id: UUID, url: str) -> None:
-        """完整的 insight 内容处理 pipeline。
+        """完整的 insight 内容处理 pipeline（异步后台任务）。
 
         流程：
         1. 检查缓存中是否有摘要
@@ -375,15 +376,15 @@ class InsightsService:
         4. 保存到 insight_contents 表
         5. 更新缓存状态
 
-        不抛出异常，所有错误仅记录日志。
+        作为后台任务运行，不阻塞主流程。所有错误仅记录日志。
         """
         try:
-            logger.info(f"开始处理 insight 内容 pipeline: {url}")
+            logger.info(f"[后台任务] 开始处理 insight 内容: insight_id={insight_id}, url={url}")
             
             # 1. 抓取页面内容（先抓页面，再根据页面内容生成摘要）
             page = await fetch_page_content(url)
             logger.info(
-                f"抓取页面内容完成：status={page.get('status_code')}, ct={page.get('content_type')},"
+                f"[后台任务] 抓取页面内容完成：status={page.get('status_code')}, ct={page.get('content_type')},"
                 f" html={'Y' if page.get('html') else 'N'}, text_len={len(page.get('text') or '')},"
                 f" blocked={page.get('blocked_reason')}"
             )
@@ -415,16 +416,17 @@ class InsightsService:
                     input_limit = 16000
                 if len(cleaned_text) > input_limit:
                     cleaned_text = cleaned_text[:input_limit]
-            logger.info(f"清理后文本长度: {len(cleaned_text) if cleaned_text else 0}")
+            logger.info(f"[后台任务] 清理后文本长度: {len(cleaned_text) if cleaned_text else 0}")
 
             # 3. 生成摘要（基于清理后的文本）
             summary_text = None
             try:
                 if cleaned_text:
+                    logger.info(f"[后台任务] 开始生成摘要: {url}")
                     summary_text = await generate_summary(cleaned_text)
                     from app.routers.metadata import summary_cache
                     if summary_text:
-                        logger.info(f"生成摘要完成: {url}，长度={len(summary_text)}")
+                        logger.info(f"[后台任务] 生成摘要完成: {url}，长度={len(summary_text)}")
                         summary_cache[url] = {
                             'status': 'completed',
                             'created_at': datetime.now(),
@@ -432,7 +434,7 @@ class InsightsService:
                             'error': None
                         }
                     else:
-                        logger.warning("生成摘要为空，标记为失败")
+                        logger.warning("[后台任务] 生成摘要为空，标记为失败")
                         summary_cache[url] = {
                             'status': 'failed',
                             'created_at': datetime.now(),
@@ -441,7 +443,7 @@ class InsightsService:
                         }
             except Exception as _sum_err:
                 from app.routers.metadata import summary_cache
-                logger.debug(f"summary 生成失败: {_sum_err}")
+                logger.warning(f"[后台任务] 摘要生成失败: {_sum_err}")
                 summary_cache[url] = {
                     'status': 'failed',
                     'created_at': datetime.now(),
@@ -503,9 +505,9 @@ class InsightsService:
                 .execute()
             )
             if hasattr(content_res, 'error') and content_res.error:
-                logger.warning(f"保存 insight_contents 失败: {content_res.error}")
+                logger.warning(f"[后台任务] 保存 insight_contents 失败: {content_res.error}")
             else:
-                logger.info(f"insight_contents 保存成功: {url}")
+                logger.info(f"[后台任务] insight_contents 保存成功: {url}")
                 
                 # 6.1 保存后回读校验，如 summary 为空且我们本地有 summary_text，则进行一次回填更新
                 try:
@@ -529,16 +531,17 @@ class InsightsService:
                             .execute()
                         )
                         if hasattr(upd, 'error') and upd.error:
-                            logger.warning(f"insight_contents 回填 summary 失败: {upd.error}")
+                            logger.warning(f"[后台任务] insight_contents 回填 summary 失败: {upd.error}")
                         else:
-                            logger.info("insight_contents 回填 summary 成功")
+                            logger.info("[后台任务] insight_contents 回填 summary 成功")
                 except Exception as verify_err:
-                    logger.warning(f"insight_contents 回读/回填校验失败: {verify_err}")
+                    logger.warning(f"[后台任务] insight_contents 回读/回填校验失败: {verify_err}")
                 
         except Exception as content_err:
-            logger.warning(f"后台保存网页内容失败（不影响主流程）: {content_err}")
+            logger.error(f"[后台任务] 内容处理失败: {content_err}")
             # 更新缓存状态为失败
             try:
+                from app.routers.metadata import summary_cache
                 summary_cache[url] = {
                     'status': 'failed',
                     'created_at': datetime.now(),
@@ -547,6 +550,8 @@ class InsightsService:
                 }
             except Exception:
                 pass
+        finally:
+            logger.info(f"[后台任务] 内容处理任务结束: insight_id={insight_id}, url={url}")
     
     @staticmethod
     async def update_insight(insight_id: UUID, insight_data: InsightUpdate, user_id: UUID) -> Dict[str, Any]:
