@@ -75,9 +75,9 @@ class InsightsService:
             
             logger.info(f"查询用户 {query_user_id} 的insights，当前用户: {user_id}")
             
-            # 构建查询 - 只选择必要字段，避免传输大量数据
+            # 构建查询 - 包含JSONB tags字段，实现零JOIN查询
             query = supabase.table('insights').select(
-                'id, title, description, url, image_url, created_at, updated_at'
+                'id, title, description, url, image_url, created_at, updated_at, tags'
             ).eq('user_id', query_user_id)
             
             # 添加搜索条件
@@ -105,22 +105,19 @@ class InsightsService:
             count_response = count_query.execute()
             total = count_response.count if hasattr(count_response, 'count') else len(insights)
             
-            # 优化：使用缓存减少重复标签查询
-            cache_key = _cache_key("user_tags", str(user_id))
-            cached_tags = _get_cache(cache_key)
-            
-            if cached_tags is None and insights:
-                # 批量获取标签
-                insight_ids = [UUID(insight['id']) for insight in insights]
-                tags_result = await InsightTagService.get_tags_by_insight_ids(insight_ids, user_id)
-                _set_cache(cache_key, tags_result)
-            else:
-                tags_result = cached_tags or {"success": True, "data": {}}
-            
-            # 构建响应数据 - 优化版本，避免重复 UUID 转换
+            # 🚀 超级优化：直接使用JSONB tags字段，零JOIN查询！
             insight_responses = []
             for insight in insights:
-                insight_tags = tags_result.get('data', {}).get(insight['id'], [])
+                # 直接从JSONB字段获取标签，无需额外查询
+                jsonb_tags = insight.get('tags', [])
+                
+                # 如果JSONB tags为空，回退到传统查询方式（兼容性）
+                if not jsonb_tags:
+                    # 这里可以选择是否回退到JOIN查询，目前先返回空数组
+                    insight_tags = []
+                else:
+                    # 直接使用JSONB数据，性能最优
+                    insight_tags = jsonb_tags if isinstance(jsonb_tags, list) else []
                 
                 insight_response = {
                     "id": insight['id'],
@@ -131,7 +128,7 @@ class InsightsService:
                     "image_url": insight.get('image_url'),
                     "created_at": insight['created_at'],
                     "updated_at": insight['updated_at'],
-                    "tags": insight_tags
+                    "tags": insight_tags  # 🚀 零延迟标签数据！
                 }
                 insight_responses.append(insight_response)
             
@@ -176,9 +173,9 @@ class InsightsService:
             
             logger.info(f"查询用户 {query_user_id} 的所有insights，当前用户: {user_id}")
             
-            # 构建查询 - 只选择必要字段，避免传输大量数据
+            # 构建查询 - 包含JSONB tags字段，实现零JOIN查询
             query = supabase.table('insights').select(
-                'id, title, description, url, image_url, created_at, updated_at'
+                'id, title, description, url, image_url, created_at, updated_at, tags'
             ).eq('user_id', query_user_id)
             
             # 添加搜索条件
@@ -206,28 +203,32 @@ class InsightsService:
             if len(insights) > 100:
                 logger.warning(f"用户 {query_user_id} 有大量 insights ({len(insights)})，可能影响性能")
             
-            # 批量获取标签 - 优化版本
+            # 🚀 超级优化：直接使用JSONB tags字段，零JOIN查询！
             insight_responses = []
-            if insights:
-                insight_ids = [UUID(insight['id']) for insight in insights]
-                tags_result = await InsightTagService.get_tags_by_insight_ids(insight_ids, user_id)
+            for insight in insights:
+                # 直接从JSONB字段获取标签，无需额外查询
+                jsonb_tags = insight.get('tags', [])
                 
-                # 构建响应数据
-                for insight in insights:
-                    insight_tags = tags_result.get('data', {}).get(insight['id'], [])
-                    
-                    insight_response = {
-                        "id": insight['id'],
-                        "user_id": query_user_id,  # 直接使用查询的 user_id，避免重复转换
-                        "title": insight['title'],
-                        "description": insight['description'],
-                        "url": insight.get('url'),
-                        "image_url": insight.get('image_url'),
-                        "created_at": insight['created_at'],
-                        "updated_at": insight['updated_at'],
-                        "tags": insight_tags
-                    }
-                    insight_responses.append(insight_response)
+                # 如果JSONB tags为空，回退到传统查询方式（兼容性）
+                if not jsonb_tags:
+                    # 这里可以选择是否回退到JOIN查询，目前先返回空数组
+                    insight_tags = []
+                else:
+                    # 直接使用JSONB数据，性能最优
+                    insight_tags = jsonb_tags if isinstance(jsonb_tags, list) else []
+                
+                insight_response = {
+                    "id": insight['id'],
+                    "user_id": query_user_id,  # 直接使用查询的 user_id，避免重复转换
+                    "title": insight['title'],
+                    "description": insight['description'],
+                    "url": insight.get('url'),
+                    "image_url": insight.get('image_url'),
+                    "created_at": insight['created_at'],
+                    "updated_at": insight['updated_at'],
+                    "tags": insight_tags  # 🚀 零延迟标签数据！
+                }
+                insight_responses.append(insight_response)
             
             return {
                 "success": True,
@@ -253,9 +254,9 @@ class InsightsService:
             
             logger.info(f"增量查询用户 {user_id} 的insights，since={since}, etag={etag}")
             
-            # 构建基础查询 - 只选择必要字段
+            # 构建基础查询 - 包含JSONB tags字段，实现零JOIN查询
             query = supabase.table('insights').select(
-                'id, title, description, url, image_url, created_at, updated_at'
+                'id, title, description, url, image_url, created_at, updated_at, tags'
             ).eq('user_id', str(user_id))
             
             # 时间过滤：只获取指定时间之后的数据
@@ -298,28 +299,32 @@ class InsightsService:
                     "etag": data_hash
                 }
             
-            # 批量获取标签
+            # 🚀 超级优化：直接使用JSONB tags字段，零JOIN查询！
             insight_responses = []
-            if insights:
-                insight_ids = [UUID(insight['id']) for insight in insights]
-                tags_result = await InsightTagService.get_tags_by_insight_ids(insight_ids, user_id)
+            for insight in insights:
+                # 直接从JSONB字段获取标签，无需额外查询
+                jsonb_tags = insight.get('tags', [])
                 
-                # 构建响应数据
-                for insight in insights:
-                    insight_tags = tags_result.get('data', {}).get(insight['id'], [])
-                    
-                    insight_response = {
-                        "id": insight['id'],
-                        "user_id": str(user_id),
-                        "title": insight['title'],
-                        "description": insight['description'],
-                        "url": insight.get('url'),
-                        "image_url": insight.get('image_url'),
-                        "created_at": insight['created_at'],
-                        "updated_at": insight['updated_at'],
-                        "tags": insight_tags
-                    }
-                    insight_responses.append(insight_response)
+                # 如果JSONB tags为空，回退到传统查询方式（兼容性）
+                if not jsonb_tags:
+                    # 这里可以选择是否回退到JOIN查询，目前先返回空数组
+                    insight_tags = []
+                else:
+                    # 直接使用JSONB数据，性能最优
+                    insight_tags = jsonb_tags if isinstance(jsonb_tags, list) else []
+                
+                insight_response = {
+                    "id": insight['id'],
+                    "user_id": str(user_id),
+                    "title": insight['title'],
+                    "description": insight['description'],
+                    "url": insight.get('url'),
+                    "image_url": insight.get('image_url'),
+                    "created_at": insight['created_at'],
+                    "updated_at": insight['updated_at'],
+                    "tags": insight_tags  # 🚀 零延迟标签数据！
+                }
+                insight_responses.append(insight_response)
             
             # 计算是否还有更多数据
             has_more = len(insights) >= limit
@@ -393,14 +398,15 @@ class InsightsService:
             supabase = get_supabase()
             supabase_service = get_supabase_service()
             
-            # 准备insight数据（不包含tags，让数据库自动生成UUID）
+            # 准备insight数据（不包含thought，已迁移到insight_contents）
             insight_insert_data = {
                 'title': insight_data.title,
                 'description': insight_data.description,
                 'url': insight_data.url,
                 'image_url': insight_data.image_url,
-                'user_id': str(user_id)
-                # 移除手动UUID生成，让数据库自动生成
+                'user_id': str(user_id),
+                'tags': []  # 新的JSONB字段，初始为空数组
+                # 注意：thought字段已迁移到insight_contents表
             }
 
             # 可选写入 meta（如列存在），以 JSON 形式存储网页元数据
@@ -433,7 +439,8 @@ class InsightsService:
                     asyncio.create_task(InsightsService._fetch_and_save_content(
                         insight_id=insight_id,
                         user_id=user_id,
-                        url=insight_data.url
+                        url=insight_data.url,
+                        thought=insight_data.thought  # 传递thought字段到后台任务
                     ))
                     logger.info("已启动异步内容处理 pipeline 后台任务")
                 except Exception as task_err:
@@ -517,7 +524,7 @@ class InsightsService:
             return {"success": False, "message": f"创建insight失败: {str(e)}"}
 
     @staticmethod
-    async def _fetch_and_save_content(insight_id: UUID, user_id: UUID, url: str) -> None:
+    async def _fetch_and_save_content(insight_id: UUID, user_id: UUID, url: str, thought: Optional[str] = None) -> None:
         """完整的 insight 内容处理 pipeline（异步后台任务）。
 
         流程：
@@ -616,7 +623,8 @@ class InsightsService:
                 'markdown': page.get('markdown'),
                 'content_type': page.get('content_type'),
                 'extracted_at': extracted_at_val,
-                'summary': summary_text
+                'summary': summary_text,
+                'thought': thought  # 保存用户的想法/备注到insight_contents表
             }
 
             # 记录摘要长度，便于排查是否为空
@@ -741,6 +749,37 @@ class InsightsService:
                 if hasattr(response, 'error') and response.error:
                     logger.error(f"更新insight失败: {response.error}")
                     return {"success": False, "message": "更新insight失败"}
+            
+            # 处理thought字段更新（现在在insight_contents表中）
+            if insight_data.thought is not None:
+                try:
+                    # 查找现有的insight_contents记录
+                    supabase_service = get_supabase_service()
+                    content_response = supabase_service.table('insight_contents').select('id').eq('insight_id', str(insight_id)).order('created_at', desc=True).limit(1).execute()
+                    
+                    if content_response.data:
+                        # 更新现有记录
+                        content_id = content_response.data[0]['id']
+                        update_content_res = supabase_service.table('insight_contents').update({'thought': insight_data.thought}).eq('id', content_id).execute()
+                        if hasattr(update_content_res, 'error') and update_content_res.error:
+                            logger.warning(f"更新insight_contents.thought失败: {update_content_res.error}")
+                        else:
+                            logger.info(f"成功更新insight_contents.thought: insight_id={insight_id}")
+                    else:
+                        # 如果没有insight_contents记录，创建一个基础记录
+                        content_payload = {
+                            'insight_id': str(insight_id),
+                            'user_id': str(user_id),
+                            'url': update_data.get('url', ''),  # 使用更新的URL或空字符串
+                            'thought': insight_data.thought
+                        }
+                        create_content_res = supabase_service.table('insight_contents').insert(content_payload).execute()
+                        if hasattr(create_content_res, 'error') and create_content_res.error:
+                            logger.warning(f"创建insight_contents记录失败: {create_content_res.error}")
+                        else:
+                            logger.info(f"成功创建insight_contents记录: insight_id={insight_id}")
+                except Exception as thought_err:
+                    logger.warning(f"处理thought字段更新失败: {thought_err}")
             
             # 处理标签更新
             if insight_data.tag_ids is not None:

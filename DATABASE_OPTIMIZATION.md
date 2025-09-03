@@ -23,6 +23,12 @@ CREATE INDEX IF NOT EXISTS idx_insights_user_created ON insights(user_id, create
 
 -- 全文搜索索引（用于标题和描述搜索）
 CREATE INDEX IF NOT EXISTS idx_insights_search ON insights USING gin(to_tsvector('english', title || ' ' || description));
+
+-- 🆕 JSONB tags 字段索引（用于标签查询和过滤）
+CREATE INDEX IF NOT EXISTS idx_insights_tags ON insights USING gin(tags);
+
+-- 🆕 复合索引：用户ID + tags（用于用户标签过滤）
+CREATE INDEX IF NOT EXISTS idx_insights_user_tags ON insights(user_id) WHERE jsonb_array_length(tags) > 0;
 ```
 
 ### 2. **insight_tags 表索引**
@@ -65,6 +71,12 @@ CREATE INDEX IF NOT EXISTS idx_insight_contents_url ON insight_contents(url);
 
 -- 创建时间索引（用于排序）
 CREATE INDEX IF NOT EXISTS idx_insight_contents_created_at ON insight_contents(created_at DESC);
+
+-- 🆕 thought 字段全文搜索索引（用于搜索用户想法）
+CREATE INDEX IF NOT EXISTS idx_insight_contents_thought_search ON insight_contents USING gin(to_tsvector('english', COALESCE(thought, '')));
+
+-- 🆕 复合索引：insight_id + thought存在性（优化有想法的内容查询）
+CREATE INDEX IF NOT EXISTS idx_insight_contents_insight_thought ON insight_contents(insight_id) WHERE thought IS NOT NULL AND thought != '';
 ```
 
 ## ⚡ **查询优化策略**
