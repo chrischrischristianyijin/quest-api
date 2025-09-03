@@ -22,8 +22,8 @@ async def generate_summary(text: str) -> Optional[str]:
     - SUMMARY_PROVIDER: 默认 'openai'
     - SUMMARY_MODEL: 默认 'gpt-5-mini'（可替换为兼容模型）
     - OPENAI_API_KEY / OPENAI_BASE_URL: 兼容 OpenAI 风格接口
-    - SUMMARY_MAX_TOKENS: 输出上限（默认 360）
-    - SUMMARY_INPUT_CHAR_LIMIT: 输入截断（默认 8000）
+    - SUMMARY_MAX_TOKENS: 输出上限（默认 800）
+    - SUMMARY_INPUT_CHAR_LIMIT: 输入截断（默认 12000）
     """
     try:
         if not _enabled():
@@ -34,8 +34,8 @@ async def generate_summary(text: str) -> Optional[str]:
 
         provider = (os.getenv('SUMMARY_PROVIDER') or 'openai').lower()
         model = os.getenv('SUMMARY_MODEL') or 'gpt-5-mini'
-        max_tokens = int(os.getenv('SUMMARY_MAX_TOKENS', '360') or '360')
-        input_limit = int(os.getenv('SUMMARY_INPUT_CHAR_LIMIT', '8000') or '8000')
+        max_tokens = int(os.getenv('SUMMARY_MAX_TOKENS', '800') or '800')
+        input_limit = int(os.getenv('SUMMARY_INPUT_CHAR_LIMIT', '12000') or '12000')
         chunk_limit = int(os.getenv('SUMMARY_CHUNK_CHAR_LIMIT', '4000') or '4000')
         max_chunks = int(os.getenv('SUMMARY_MAX_CHUNKS', '8') or '8')
 
@@ -195,14 +195,23 @@ async def generate_summary(text: str) -> Optional[str]:
                         pass
                     content = message.get('content')
                     content_out = content.strip() if content else None
+                    
+                    # 检查 finish_reason 并提供详细日志
+                    if finish_reason == 'length':
+                        logger.warning(f"summary: 输出被长度截断，考虑增加 max_completion_tokens (当前={max_tokens})")
+                    elif finish_reason == 'content_filter':
+                        logger.warning("summary: 内容被过滤器拦截，可能包含敏感内容")
+                    elif not content_out:
+                        logger.warning(f"summary: 空输出，finish_reason={finish_reason}, completion_tokens={completion_tokens}")
+                    
                     logger.info(f"summary: 调用成功，返回长度={len(content_out) if content_out else 0}, preview={(content_out[:200] if content_out else '')}")
                     return content_out
 
             async def _call_once_strict(snip: str, mdl: str) -> Optional[str]:
                 """更强提示，避免空输出。"""
                 strict_system = (
-                    "You are a summarization assistant. Return ONLY a plain text summary (2-4 sentences). "
-                    "Do not return JSON, code blocks, or empty content."
+                    "You are a summarization assistant. Provide a clear, concise summary in 2-4 sentences. "
+                    "Focus on the main points and key information. Use plain text format."
                 )
                 payload = {
                     'model': mdl,
@@ -249,7 +258,17 @@ async def generate_summary(text: str) -> Optional[str]:
                     except Exception:
                         pass
                     content = message.get('content')
-                    return content.strip() if content else None
+                    content_out = content.strip() if content else None
+                    
+                    # 检查 finish_reason
+                    if finish_reason == 'length':
+                        logger.warning(f"summary(strict): 输出被长度截断，考虑增加 max_completion_tokens (当前={max_tokens})")
+                    elif finish_reason == 'content_filter':
+                        logger.warning("summary(strict): 内容被过滤器拦截")
+                    elif not content_out:
+                        logger.warning(f"summary(strict): 空输出，finish_reason={finish_reason}, completion_tokens={completion_tokens}")
+                    
+                    return content_out
 
             def _extractive_fallback(snip: str) -> str:
                 """抽取式兜底：取前两句或前 240 字。"""

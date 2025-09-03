@@ -35,7 +35,7 @@ services:
       - key: SUMMARY_MODEL
         value: gpt-3.5-turbo
       - key: SUMMARY_MAX_TOKENS
-        value: 220
+        value: 800
       - key: SUMMARY_INPUT_CHAR_LIMIT
         value: 12000
       - key: SUMMARY_CHUNK_CHAR_LIMIT
