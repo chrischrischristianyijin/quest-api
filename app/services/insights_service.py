@@ -410,9 +410,9 @@ class InsightsService:
                 cleaned_text = re.sub(r"\s+", " ", cleaned_text)
                 # 限长，避免超出模型输入限制（与 SUMMARY_INPUT_CHAR_LIMIT 对齐）
                 try:
-                    input_limit = int(os.getenv('SUMMARY_INPUT_CHAR_LIMIT', '12000') or '12000')
+                    input_limit = int(os.getenv('SUMMARY_INPUT_CHAR_LIMIT', '16000') or '16000')
                 except Exception:
-                    input_limit = 12000
+                    input_limit = 16000
                 if len(cleaned_text) > input_limit:
                     cleaned_text = cleaned_text[:input_limit]
             logger.info(f"清理后文本长度: {len(cleaned_text) if cleaned_text else 0}")

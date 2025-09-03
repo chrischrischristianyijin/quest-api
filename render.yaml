@@ -33,11 +33,11 @@ services:
       - key: SUMMARY_PROVIDER
         value: openai
       - key: SUMMARY_MODEL
-        value: gpt-3.5-turbo
+        value: gpt-5-nano
       - key: SUMMARY_MAX_TOKENS
-        value: 800
+        value: 1200
       - key: SUMMARY_INPUT_CHAR_LIMIT
-        value: 12000
+        value: 16000
       - key: SUMMARY_CHUNK_CHAR_LIMIT
         value: 4000
       - key: SUMMARY_MAX_CHUNKS
