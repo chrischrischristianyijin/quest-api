@@ -704,25 +704,6 @@ class InsightsService:
         finally:
             logger.info(f"[后台任务] 内容处理任务结束: insight_id={insight_id}, url={url}")
 
-
-def _generate_etag(insights: list) -> str:
-    """生成数据的 ETag 指纹"""
-    try:
-        # 创建数据指纹：基于 ID 和更新时间
-        fingerprint_data = []
-        for insight in insights:
-            fingerprint_data.append({
-                'id': insight.get('id'),
-                'updated_at': insight.get('updated_at')
-            })
-        
-        # 生成 MD5 哈希
-        data_str = json.dumps(fingerprint_data, sort_keys=True, default=str)
-        return hashlib.md5(data_str.encode()).hexdigest()
-    except Exception:
-        # 如果生成失败，返回基于时间的简单哈希
-        return hashlib.md5(str(datetime.utcnow()).encode()).hexdigest()
-    
     @staticmethod
     async def update_insight(insight_id: UUID, insight_data: InsightUpdate, user_id: UUID) -> Dict[str, Any]:
         """更新insight"""
@@ -807,3 +788,24 @@ def _generate_etag(insights: list) -> str:
         except Exception as e:
             logger.error(f"删除insight失败: {str(e)}")
             return {"success": False, "message": f"删除insight失败: {str(e)}"}
+
+
+def _generate_etag(insights: list) -> str:
+    """生成数据的 ETag 指纹"""
+    try:
+        # 创建数据指纹：基于 ID 和更新时间
+        fingerprint_data = []
+        for insight in insights:
+            fingerprint_data.append({
+                'id': insight.get('id'),
+                'updated_at': insight.get('updated_at')
+            })
+        
+        # 生成 MD5 哈希
+        data_str = json.dumps(fingerprint_data, sort_keys=True, default=str)
+        return hashlib.md5(data_str.encode()).hexdigest()
+    except Exception:
+        # 如果生成失败，返回基于时间的简单哈希
+        return hashlib.md5(str(datetime.utcnow()).encode()).hexdigest()
+
+
