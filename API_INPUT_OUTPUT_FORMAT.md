@@ -19,9 +19,10 @@
 - `PUT /api/v1/user/profile` - 更新用户资料
 - `POST /api/v1/user/upload-avatar` - 上传头像（表单+文件）
 
-### **见解管理接口 (6个)**
+### **见解管理接口 (7个)**
 - `GET /api/v1/insights` - 获取用户见解列表（分页）
 - `GET /api/v1/insights/all` - 获取用户所有见解
+- `GET /api/v1/insights/sync/incremental` - 增量同步见解（性能优化）
 - `GET /api/v1/insights/{insight_id}` - 获取单个见解详情
 - `POST /api/v1/insights` - 创建新见解（自动提取metadata）
 - `PUT /api/v1/insights/{insight_id}` - 更新见解
@@ -38,13 +39,13 @@
 
 ### **元数据提取接口 (2个)**
 - `POST /api/v1/metadata/extract` - 提取网页元数据（表单）
-- `POST /api/v1/metadata/create-insight` - 已废弃：仅返回元数据（等价于 /api/v1/metadata/extract）
+- `GET /api/v1/metadata/summary/{url:path}` - 获取URL摘要生成状态
 
 ### **系统接口 (2个)**
 - `GET /` - API根路径
 - `GET /health` - 健康检查
 
-**总计：30个API端点**
+**总计：31个API端点**
 
 ---
 
@@ -275,6 +276,59 @@ Authorization: Bearer {token}
         ]
       }
     ]
+  }
+}
+```
+
+### 增量同步见解（性能优化）
+```http
+GET /api/v1/insights/sync/incremental?since=2024-01-15T10:30:00Z&etag=abc123&limit=50
+Authorization: Bearer {token}
+```
+
+**参数说明：**
+- `since`: 上次同步时间戳（ISO格式，可选）
+- `etag`: 上次响应的ETag（可选，用于缓存验证）
+- `limit`: 每次获取数量（默认50，最大100）
+
+**功能特点：**
+- 只返回指定时间后变动的见解数据
+- 支持ETag缓存机制，避免重复传输
+- 适合移动端和频繁同步的场景
+- 大幅减少网络传输量和服务器负载
+
+**响应示例（有更新）：**
+```json
+{
+  "success": true,
+  "data": {
+    "insights": [
+      {
+        "id": "660e8400-e29b-41d4-a716-446655440000",
+        "user_id": "550e8400-e29b-41d4-a716-446655440000",
+        "title": "更新的见解标题",
+        "description": "更新的描述内容",
+        "updated_at": "2024-01-15T11:30:00Z",
+        "operation": "updated"
+      }
+    ],
+    "has_more": false,
+    "last_modified": "2024-01-15T11:30:00Z",
+    "etag": "def456"
+  }
+}
+```
+
+**响应示例（无更新，304状态码）：**
+```json
+{
+  "success": true,
+  "message": "数据未变更",
+  "data": {
+    "insights": [],
+    "has_more": false,
+    "last_modified": "2024-01-15T10:30:00Z",
+    "etag": "abc123"
   }
 }
 ```
@@ -726,28 +780,24 @@ if (insightData.success) {
 }
 ```
 
-### 3. 从URL创建insight
+### 3. 提取网页元数据
 ```javascript
-// 从URL创建insight（自动提取metadata）
-const insightResponse = await fetch('/api/v1/metadata/create-insight', {
+// 提取网页元数据（不创建insight）
+const metadataResponse = await fetch('/api/v1/metadata/extract', {
   method: 'POST',
   headers: {
-    'Content-Type': 'application/x-www-form-urlencoded',
-    'Authorization': `Bearer ${access_token}`
+    'Content-Type': 'application/x-www-form-urlencoded'
   },
   body: new URLSearchParams({
-    url: 'https://example.com/article',
-    title: '自定义标题（可选）',
-    description: '自定义描述（可选）',
-    thought: '这个领域发展很快，值得深入研究，我计划深入学习机器学习和深度学习',
-    tags: '技术,AI,机器学习'  // 逗号分隔的标签
+    url: 'https://example.com/article'
   })
 });
 
-const insightData = await insightResponse.json();
-if (insightData.success) {
-  console.log('Insight创建成功:', insightData.data);
-  console.log('标签信息:', insightData.data.tags);
+const metadataData = await metadataResponse.json();
+if (metadataData.success) {
+  console.log('元数据提取成功:', metadataData.data);
+  // 可以使用提取的元数据创建insight
+  // 使用 POST /api/v1/insights 接口
 }
 ```
 
@@ -812,34 +862,61 @@ url=https://example.com/article
 }
 ```
 
-### 2. 从URL创建Insight（已废弃）
-**POST** `/api/v1/metadata/create-insight`
+### 2. 获取URL摘要生成状态
+**GET** `/api/v1/metadata/summary/{url:path}`
 
-**当前行为**: 仅提取网页元数据并返回（不创建 insight），与 `/api/v1/metadata/extract` 一致。
+**功能**: 获取指定URL的AI摘要生成状态和结果
 
-**输入（表单）**:
-```
-Content-Type: application/x-www-form-urlencoded
+**参数说明：**
+- `url`: 需要查询的URL（路径参数）
 
-url=https://example.com/article
-```
-
-**输出（示例）**:
+**输出（生成中）**:
 ```json
 {
   "success": true,
-  "message": "此端点已废弃，仅返回元数据。请改用 /api/v1/insights 创建。",
+  "message": "摘要生成中",
   "data": {
     "url": "https://example.com/article",
-    "title": "文章标题",
-    "description": "文章描述",
-    "image_url": "https://example.com/image.jpg",
-    "suggested_tags": [],
-    "domain": "example.com",
-    "extracted_at": "2024-01-01T00:00:00.000Z"
+    "status": "processing",
+    "summary": null,
+    "error": null,
+    "created_at": "2024-01-15T10:30:00Z"
   }
 }
 ```
+
+**输出（生成完成）**:
+```json
+{
+  "success": true,
+  "message": "摘要生成成功",
+  "data": {
+    "url": "https://example.com/article",
+    "status": "completed",
+    "summary": "这是AI生成的内容摘要...",
+    "error": null,
+    "created_at": "2024-01-15T10:30:00Z"
+  }
+}
+```
+
+**输出（未找到）**:
+```json
+{
+  "success": true,
+  "message": "摘要未生成或已过期",
+  "data": {
+    "url": "https://example.com/article",
+    "status": "not_found",
+    "summary": null,
+    "error": null,
+    "created_at": null
+  }
+}
+```
+
+
+
 
 ## 👤 用户管理接口
 
@@ -1036,32 +1113,7 @@ if (insightData.success) {
 }
 ```
 
-### 3. 从URL创建insight
-```javascript
-// 从URL创建insight（自动提取metadata）
-const insightResponse = await fetch('/api/v1/metadata/create-insight', {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/x-www-form-urlencoded',
-    'Authorization': `Bearer ${access_token}`
-  },
-  body: new URLSearchParams({
-    url: 'https://example.com/article',
-    title: '自定义标题（可选）',
-    description: '自定义描述（可选）',
-    thought: '这个领域发展很快，值得深入研究，我计划深入学习机器学习和深度学习',
-    tags: '技术,AI,机器学习'  // 逗号分隔的标签
-  })
-});
-
-const insightData = await insightResponse.json();
-if (insightData.success) {
-  console.log('Insight创建成功:', insightData.data);
-  console.log('标签信息:', insightData.data.tags);
-}
-```
-
-### 4. 管理标签
+### 3. 管理标签
 ```javascript
 // 创建标签
 const tagResponse = await fetch('/api/v1/user-tags', {
@@ -1110,13 +1162,15 @@ if (insightsData.success) {
 
 Quest API 提供完整的智能书签和知识管理功能：
 
-- **21个API端点**，覆盖用户、内容、标签等核心功能
+- **33个API端点**，覆盖用户、内容、标签等核心功能
 - **标准化响应格式**，统一的成功/错误处理
 - **完整的CRUD操作**，支持见解、标签管理
 - **智能元数据提取**，一键保存网页内容
 - **用户认证系统**，支持邮箱密码和Google OAuth
 - **用户资料管理**，支持昵称、头像、个人简介
 - **灵活的insights获取**，支持分页和一次性获取所有
+- **增量同步机制**，支持高效的数据同步和缓存
+- **AI摘要功能**，支持网页内容智能摘要生成
 - **多对多标签关联**，通过桥表管理insights和tags的关系
 - **灵活的insight创建**：支持直接创建和从URL创建两种方式
 
