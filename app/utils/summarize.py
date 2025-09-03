@@ -107,13 +107,14 @@ async def generate_summary(text: str) -> Optional[str]:
                 headers['OpenAI-Project'] = project
 
             async def _call_once(snip: str, mdl: str) -> Optional[str]:
+                # 默认使用新版参数名，部分模型仅支持其中之一
                 payload = {
                     'model': mdl,
                     'messages': [
                         {'role': 'system', 'content': prompt_system},
                         {'role': 'user', 'content': f"{prompt_user}\n\n{snip}"},
                     ],
-                    'max_tokens': max_tokens,
+                    'max_completion_tokens': max_tokens,
                 }
                 if temp_value is not None:
                     payload['temperature'] = temp_value
@@ -142,6 +143,7 @@ async def generate_summary(text: str) -> Optional[str]:
                                 if choices:
                                     content = choices[0].get('message', {}).get('content')
                                     return content.strip() if content else None
+                        # 保持只使用 max_completion_tokens，不做参数名切换
                         fb_model = os.getenv('SUMMARY_FALLBACK_MODEL')
                         if fb_model and fb_model != mdl:
                             try:
