@@ -2,6 +2,7 @@ from typing import Optional
 import os
 import logging
 import httpx
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +22,7 @@ async def generate_summary(text: str) -> Optional[str]:
     - SUMMARY_PROVIDER: 默认 'openai'
     - SUMMARY_MODEL: 默认 'gpt-5-nano'（可替换为兼容模型）
     - OPENAI_API_KEY / OPENAI_BASE_URL: 兼容 OpenAI 风格接口
-    - SUMMARY_MAX_TOKENS: 输出上限（默认 220）
+    - SUMMARY_MAX_TOKENS: 输出上限（默认 360）
     - SUMMARY_INPUT_CHAR_LIMIT: 输入截断（默认 12000）
     """
     try:
@@ -33,7 +34,7 @@ async def generate_summary(text: str) -> Optional[str]:
 
         provider = (os.getenv('SUMMARY_PROVIDER') or 'openai').lower()
         model = os.getenv('SUMMARY_MODEL') or 'gpt-5-nano'
-        max_tokens = int(os.getenv('SUMMARY_MAX_TOKENS', '220') or '220')
+        max_tokens = int(os.getenv('SUMMARY_MAX_TOKENS', '360') or '360')
         input_limit = int(os.getenv('SUMMARY_INPUT_CHAR_LIMIT', '12000') or '12000')
         chunk_limit = int(os.getenv('SUMMARY_CHUNK_CHAR_LIMIT', '4000') or '4000')
         max_chunks = int(os.getenv('SUMMARY_MAX_CHUNKS', '8') or '8')
@@ -75,12 +76,21 @@ async def generate_summary(text: str) -> Optional[str]:
             return chunks
 
         prompt_system = (
-            "You are a concise summarization assistant. Provide a 2-4 sentence summary "
-            "capturing the key points only. Exclude navigation, table of contents, and ads. "
-            "If the text is not natural language prose (e.g., code/logs/noise), summarize its topic or purpose. "
-            "Always write the summary in the same language as the input."
+            "You are a neutral, concise summarization assistant.\n\n"
+            "Always produce a usable summary (never return an empty string).\n"
+            "If any content is sensitive or disallowed, replace only that portion with bracketed placeholders "
+            "(e.g., ‘[redacted PII]’, ‘[political content omitted]’) and continue summarizing the rest.\n\n"
+            "Rules:\n"
+            "1) Target length: 3–8 sentences (or 3–6 short bullets if the source is highly structured).\n"
+            "2) Keep the original language of the input (do not translate).\n"
+            "3) Extract facts and key points; avoid opinions, speculation, or new claims.\n"
+            "4) Exclude navigation, headers/footers, boilerplate, ads, cookie banners, and comments.\n"
+            "5) For code/logs/configs, summarize purpose, main components, and notable issues.\n"
+            "6) Redact PII (emails, phone numbers, addresses, IDs) and sensitive details as placeholders, but do not drop the entire summary.\n"
+            "7) If the text is mostly noise or unreadable, output one sentence explaining it is noisy plus any clearly identifiable topic.\n"
+            "8) Return plain text only."
         )
-        prompt_user = "Summarize the following content in the same language as the input."
+        prompt_user = "Summarize the following content accordingly:"
 
         if provider == 'openai':
             api_key = os.getenv('OPENAI_API_KEY')
@@ -118,6 +128,12 @@ async def generate_summary(text: str) -> Optional[str]:
                 }
                 if temp_value is not None:
                     payload['temperature'] = temp_value
+                # 可选开启强制文本输出
+                try:
+                    if (os.getenv('SUMMARY_RESPONSE_FORMAT_TEXT', '').lower() in ('1', 'true', 'yes', 'on')):
+                        payload['response_format'] = {'type': 'text'}
+                except Exception:
+                    pass
                 async with httpx.AsyncClient(timeout=20.0) as client:
                     try:
                         resp = await client.post(f"{base_url}/chat/completions", json=payload, headers=headers)
@@ -158,11 +174,23 @@ async def generate_summary(text: str) -> Optional[str]:
                     if not choices:
                         logger.warning('summary: choices 为空')
                         return None
-                    message = choices[0].get('message', {})
+                    choice0 = choices[0]
+                    message = choice0.get('message', {})
+                    finish_reason = choice0.get('finish_reason')
+                    usage = data.get('usage') or {}
+                    completion_tokens = usage.get('completion_tokens')
+                    fingerprint = data.get('system_fingerprint')
+                    refusal = message.get('refusal')
+                    annotations = message.get('annotations')
                     # 打印 message 结构与预览，帮助排查 content 为空的原因
                     try:
                         msg_preview = str(message)[:400]
-                        logger.info(f"summary: message keys={list(message.keys())}, preview={msg_preview}")
+                        logger.info(
+                            f"summary: finish_reason={finish_reason}, completion_tokens={completion_tokens}, "
+                            f"fingerprint={fingerprint}, refusal={'Y' if refusal else 'N'}, "
+                            f"annotations_len={len(annotations) if isinstance(annotations, list) else 'NA'}; "
+                            f"message_keys={list(message.keys())}, preview={msg_preview}"
+                        )
                     except Exception:
                         pass
                     content = message.get('content')
@@ -170,30 +198,81 @@ async def generate_summary(text: str) -> Optional[str]:
                     logger.info(f"summary: 调用成功，返回长度={len(content_out) if content_out else 0}, preview={(content_out[:200] if content_out else '')}")
                     return content_out
 
-            # Map-Reduce 摘要：过长文本分块 → 分块摘要 → 汇总摘要
-            chunks = _split_into_chunks(raw, min(chunk_limit, input_limit))
-            if len(chunks) > max_chunks:
-                chunks = chunks[:max_chunks]
+            async def _call_once_strict(snip: str, mdl: str) -> Optional[str]:
+                """更强提示，避免空输出。"""
+                strict_system = (
+                    "You are a summarization assistant. Return ONLY a plain text summary (2-4 sentences). "
+                    "Do not return JSON, code blocks, or empty content."
+                )
+                payload = {
+                    'model': mdl,
+                    'messages': [
+                        {'role': 'system', 'content': strict_system},
+                        {'role': 'user', 'content': f"Summarize in plain text only (2-4 sentences):\n\n{snip}"},
+                    ],
+                    'max_completion_tokens': max_tokens,
+                }
+                if temp_value is not None:
+                    payload['temperature'] = temp_value
+                try:
+                    if (os.getenv('SUMMARY_RESPONSE_FORMAT_TEXT', '').lower() in ('1', 'true', 'yes', 'on')):
+                        payload['response_format'] = {'type': 'text'}
+                except Exception:
+                    pass
+                async with httpx.AsyncClient(timeout=20.0) as client:
+                    try:
+                        resp = await client.post(f"{base_url}/chat/completions", json=payload, headers=headers)
+                        resp.raise_for_status()
+                    except Exception as e:
+                        logger.warning(f"summary(strict) 请求失败：{e}")
+                        return None
+                    data = resp.json()
+                    choices = data.get('choices') or []
+                    if not choices:
+                        return None
+                    choice0 = choices[0]
+                    message = choice0.get('message', {})
+                    finish_reason = choice0.get('finish_reason')
+                    usage = data.get('usage') or {}
+                    completion_tokens = usage.get('completion_tokens')
+                    fingerprint = data.get('system_fingerprint')
+                    refusal = message.get('refusal')
+                    annotations = message.get('annotations')
+                    try:
+                        msg_preview = str(message)[:400]
+                        logger.info(
+                            f"summary(strict): finish_reason={finish_reason}, completion_tokens={completion_tokens}, "
+                            f"fingerprint={fingerprint}, refusal={'Y' if refusal else 'N'}, "
+                            f"annotations_len={len(annotations) if isinstance(annotations, list) else 'NA'}; "
+                            f"message_keys={list(message.keys())}, preview={msg_preview}"
+                        )
+                    except Exception:
+                        pass
+                    content = message.get('content')
+                    return content.strip() if content else None
 
-            if len(chunks) == 1:
-                return await _call_once(chunks[0], model)
+            def _extractive_fallback(snip: str) -> str:
+                """抽取式兜底：取前两句或前 240 字。"""
+                s = snip.strip()
+                if not s:
+                    return ''
+                # 按中英文句末分割，再取前两段
+                parts = re.split(r"(?<=[。！？.!?])\s+", s)
+                out = ''.join(parts[:2]).strip()
+                if not out:
+                    out = s[:240]
+                return out[:240]
 
-            partial_summaries: list[str] = []
-            for ch in chunks:
-                one = await _call_once(ch, model)
-                if one:
-                    partial_summaries.append(one)
-            if not partial_summaries:
-                return None
-
-            combined = "\n\n".join(partial_summaries)
-            if len(combined) > input_limit:
-                combined = combined[:input_limit]
-            final_prompt = (
-                "Summarize the following bullet summaries into a single concise 2-4 sentence summary, "
-                "keeping the same language as the input.\n\n" + combined
-            )
-            return await _call_once(final_prompt, model)
+            # 简化：不做分段与汇总，直接对截断文本单次生成；失败→严格重试→抽取式兜底
+            single = raw[:input_limit]
+            first = await _call_once(single, model)
+            if first and first.strip():
+                return first
+            second = await _call_once_strict(single, model)
+            if second and second.strip():
+                return second
+            fb = _extractive_fallback(single)
+            return fb if fb else None
 
         # 其他 provider 可在此扩展
         return None
