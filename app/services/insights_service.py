@@ -10,6 +10,7 @@ from copy import deepcopy
 import asyncio
 from app.utils.summarize import generate_summary
 from datetime import datetime, date
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -273,19 +274,18 @@ class InsightsService:
             logger.info(f"insight 创建成功: id={insight.get('id')}, user_id={insight.get('user_id')}")
             insight_id = UUID(insight['id'])
 
-            # 可选：抓取并保存网页内容（HTML与纯文本） - 默认关闭
+            # 抓取并保存网页内容（改为同步执行，便于排查问题）
             if os.getenv('FETCH_PAGE_CONTENT_ENABLED', '').lower() in ('1', 'true', 'yes'):
                 try:
-                    # 后台抓取与保存，不阻塞创建流程
-                    asyncio.create_task(
-                        InsightsService._fetch_and_save_content(
-                            insight_id=insight_id,
-                            user_id=user_id,
-                            url=insight_data.url
-                        )
+                    logger.info("开始同步执行内容处理 pipeline（临时关闭异步）")
+                    await InsightsService._fetch_and_save_content(
+                        insight_id=insight_id,
+                        user_id=user_id,
+                        url=insight_data.url
                     )
+                    logger.info("同步内容处理完成")
                 except Exception as content_err:
-                    logger.warning(f"调度网页内容后台抓取失败（不影响主流程）: {content_err}")
+                    logger.warning(f"同步执行内容处理失败: {content_err}")
             else:
                 logger.info("FETCH_PAGE_CONTENT_ENABLED 未开启，跳过全文抓取与保存")
             
@@ -380,14 +380,7 @@ class InsightsService:
         try:
             logger.info(f"开始处理 insight 内容 pipeline: {url}")
             
-            # 1. 检查缓存中是否有摘要
-            from app.routers.metadata import summary_cache
-            cached_summary = None
-            if url in summary_cache and summary_cache[url]['status'] == 'completed':
-                cached_summary = summary_cache[url]['summary']
-                logger.info(f"找到缓存的摘要: {url}")
-            
-            # 2. 抓取页面内容（无论是否有缓存摘要都需要）
+            # 1. 抓取页面内容（先抓页面，再根据页面内容生成摘要）
             page = await fetch_page_content(url)
             logger.info(
                 f"抓取页面内容完成：status={page.get('status_code')}, ct={page.get('content_type')},"
@@ -395,45 +388,66 @@ class InsightsService:
                 f" blocked={page.get('blocked_reason')}"
             )
 
-            # 3. 生成摘要（如果缓存中没有）
-            summary_text = cached_summary
-            if not summary_text:
+            # 2. 清理文本（标准化、压缩空白、长度限制）
+            raw_text = page.get('text') or ''
+            if not raw_text:
                 try:
-                    source_text = page.get('text') or ''
-                    if not source_text:
-                        try:
-                            desc_res = (
-                                get_supabase_service()
-                                .table('insights')
-                                .select('description')
-                                .eq('id', str(insight_id))
-                                .single()
-                                .execute()
-                            )
-                            if getattr(desc_res, 'data', None):
-                                source_text = (desc_res.data.get('description') or '').strip()
-                        except Exception:
-                            pass
-                    if source_text:
-                        summary_text = await generate_summary(source_text)
-                        logger.info(f"生成新的摘要: {url}")
-                        
-                        # 更新缓存
+                    desc_res = (
+                        get_supabase_service()
+                        .table('insights')
+                        .select('description')
+                        .eq('id', str(insight_id))
+                        .single()
+                        .execute()
+                    )
+                    if getattr(desc_res, 'data', None):
+                        raw_text = (desc_res.data.get('description') or '').strip()
+                except Exception:
+                    pass
+
+            cleaned_text = raw_text.strip()
+            if cleaned_text:
+                cleaned_text = re.sub(r"\s+", " ", cleaned_text)
+                # 限长，避免超出模型输入限制（与 SUMMARY_INPUT_CHAR_LIMIT 对齐）
+                try:
+                    input_limit = int(os.getenv('SUMMARY_INPUT_CHAR_LIMIT', '12000') or '12000')
+                except Exception:
+                    input_limit = 12000
+                if len(cleaned_text) > input_limit:
+                    cleaned_text = cleaned_text[:input_limit]
+            logger.info(f"清理后文本长度: {len(cleaned_text) if cleaned_text else 0}")
+
+            # 3. 生成摘要（基于清理后的文本）
+            summary_text = None
+            try:
+                if cleaned_text:
+                    summary_text = await generate_summary(cleaned_text)
+                    from app.routers.metadata import summary_cache
+                    if summary_text:
+                        logger.info(f"生成摘要完成: {url}，长度={len(summary_text)}")
                         summary_cache[url] = {
                             'status': 'completed',
                             'created_at': datetime.now(),
                             'summary': summary_text,
                             'error': None
                         }
-                except Exception as _sum_err:
-                    logger.debug(f"summary 生成失败: {_sum_err}")
-                    # 更新缓存状态为失败
-                    summary_cache[url] = {
-                        'status': 'failed',
-                        'created_at': datetime.now(),
-                        'summary': None,
-                        'error': str(_sum_err)
-                    }
+                    else:
+                        logger.warning("生成摘要为空，标记为失败")
+                        summary_cache[url] = {
+                            'status': 'failed',
+                            'created_at': datetime.now(),
+                            'summary': None,
+                            'error': 'empty-summary'
+                        }
+            except Exception as _sum_err:
+                from app.routers.metadata import summary_cache
+                logger.debug(f"summary 生成失败: {_sum_err}")
+                summary_cache[url] = {
+                    'status': 'failed',
+                    'created_at': datetime.now(),
+                    'summary': None,
+                    'error': str(_sum_err)
+                }
 
             # 4. 准备内容数据
             # 4. 准备内容数据（统一规范时间字段为 ISO 字符串）

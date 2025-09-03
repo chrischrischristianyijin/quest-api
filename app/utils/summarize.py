@@ -113,7 +113,7 @@ async def generate_summary(text: str) -> Optional[str]:
                         {'role': 'system', 'content': prompt_system},
                         {'role': 'user', 'content': f"{prompt_user}\n\n{snip}"},
                     ],
-                    'max_completion_tokens': max_tokens,
+                    'max_tokens': max_tokens,
                 }
                 if temp_value is not None:
                     payload['temperature'] = temp_value
@@ -154,9 +154,12 @@ async def generate_summary(text: str) -> Optional[str]:
                     data = resp.json()
                     choices = data.get('choices') or []
                     if not choices:
+                        logger.warning('summary: choices 为空')
                         return None
                     content = choices[0].get('message', {}).get('content')
-                    return content.strip() if content else None
+                    content_out = content.strip() if content else None
+                    logger.info(f"summary: 调用成功，返回长度={len(content_out) if content_out else 0}")
+                    return content_out
 
             # Map-Reduce 摘要：过长文本分块 → 分块摘要 → 汇总摘要
             chunks = _split_into_chunks(raw, min(chunk_limit, input_limit))
