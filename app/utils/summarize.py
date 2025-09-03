@@ -20,10 +20,10 @@ async def generate_summary(text: str) -> Optional[str]:
     环境变量：
     - SUMMARY_ENABLED: 开关
     - SUMMARY_PROVIDER: 默认 'openai'
-    - SUMMARY_MODEL: 默认 'gpt-5-nano'（可替换为兼容模型）
+    - SUMMARY_MODEL: 默认 'gpt-5-mini'（可替换为兼容模型）
     - OPENAI_API_KEY / OPENAI_BASE_URL: 兼容 OpenAI 风格接口
     - SUMMARY_MAX_TOKENS: 输出上限（默认 360）
-    - SUMMARY_INPUT_CHAR_LIMIT: 输入截断（默认 12000）
+    - SUMMARY_INPUT_CHAR_LIMIT: 输入截断（默认 8000）
     """
     try:
         if not _enabled():
@@ -33,9 +33,9 @@ async def generate_summary(text: str) -> Optional[str]:
             return None
 
         provider = (os.getenv('SUMMARY_PROVIDER') or 'openai').lower()
-        model = os.getenv('SUMMARY_MODEL') or 'gpt-5-nano'
+        model = os.getenv('SUMMARY_MODEL') or 'gpt-5-mini'
         max_tokens = int(os.getenv('SUMMARY_MAX_TOKENS', '360') or '360')
-        input_limit = int(os.getenv('SUMMARY_INPUT_CHAR_LIMIT', '12000') or '12000')
+        input_limit = int(os.getenv('SUMMARY_INPUT_CHAR_LIMIT', '8000') or '8000')
         chunk_limit = int(os.getenv('SUMMARY_CHUNK_CHAR_LIMIT', '4000') or '4000')
         max_chunks = int(os.getenv('SUMMARY_MAX_CHUNKS', '8') or '8')
 
@@ -81,7 +81,7 @@ async def generate_summary(text: str) -> Optional[str]:
             "If any content is sensitive or disallowed, replace only that portion with bracketed placeholders "
             "(e.g., ‘[redacted PII]’, ‘[political content omitted]’) and continue summarizing the rest.\n\n"
             "Rules:\n"
-            "1) Target length: 3–8 sentences (or 3–6 short bullets if the source is highly structured).\n"
+            "1) Target length: 2–4 sentences (or 3–6 short bullets if the source is highly structured).\n"
             "2) Keep the original language of the input (do not translate).\n"
             "3) Extract facts and key points; avoid opinions, speculation, or new claims.\n"
             "4) Exclude navigation, headers/footers, boilerplate, ads, cookie banners, and comments.\n"
