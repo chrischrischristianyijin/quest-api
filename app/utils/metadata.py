@@ -937,7 +937,7 @@ async def fetch_page_content(url: str) -> Dict[str, Any]:
                         refine_report = (refine_report or {})
                         refine_report['curation_info'] = curated.get('curation_info')
                     else:
-                                                        max_len = int(os.getenv('PAGE_TEXT_MAX_LEN', '500000') or '500000')
+                        max_len = int(os.getenv('PAGE_TEXT_MAX_LEN', '500000') or '500000')
                         refined, rep = refine_extracted_text_with_report(raw_text)
                         text = _normalize_text(refined, max_len=max_len)
                         refine_report = rep
