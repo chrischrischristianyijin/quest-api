@@ -626,8 +626,8 @@ class InsightsService:
                 'content_type': page.get('content_type'),
                 'extracted_at': extracted_at_val,
                 'summary': summary_text,
-                'thought': thought,  # 保存用户的想法/备注到insight_contents表
-                'sumy_processing': sumy_processing  # 保存 Sumy 预处理信息
+                'thought': thought  # 保存用户的想法/备注到insight_contents表
+                # 注意: sumy_processing 信息不保存到数据库，仅用于日志记录
             }
 
             # 记录处理信息

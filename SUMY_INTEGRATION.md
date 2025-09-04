@@ -21,6 +21,12 @@
 - 可配置窗口大小（默认前后各 1 段）
 - 保持文本连贯性
 
+### 💾 保存模式 🆕
+- **strict**: 严格模式，仅保存 Top-K 段落（最小化内容）
+- **balanced**: 平衡模式，Top-K + 上下文窗口（默认）
+- **preserve**: 保存模式，标记重要句子但保留更多原文（推荐用于保存更多内容）
+- 可配置保留比例（0.1-1.0，默认 0.8）
+
 ## 安装与设置
 
 ### 1. 安装依赖
@@ -42,6 +48,10 @@ export SUMY_MAX_SENTENCES=8          # 最大关键句数量
 export SUMY_TOP_K_PARAGRAPHS=4       # Top-K 段落数量
 export SUMY_CONTEXT_WINDOW=1         # 上下文窗口大小
 export SUMY_ALGORITHM=lexrank        # 算法选择 (lexrank/textrank)
+
+# 保存模式配置 🆕
+export SUMY_PRESERVE_MODE=preserve   # 保存模式 (strict/balanced/preserve)
+export SUMY_PRESERVE_RATIO=0.8       # 保存模式下的保留比例 (0.1-1.0)
 
 # LLM 摘要配置（处理预处理后的内容）
 export SUMMARY_ENABLED=1
@@ -73,7 +83,7 @@ POST /api/v1/insights
 2. **内容清洗**：Curator 清洗 + 文本规范化
 3. **Sumy 预处理**：提取关键段落（Top-K + 上下文）
 4. **LLM 摘要**：基于预处理后的关键内容生成摘要
-5. **结果保存**：保存预处理后的内容和摘要
+5. **结果保存**：保存预处理后的内容和摘要（预处理信息仅记录日志，不存储到数据库）
 
 ## 算法详解
 
@@ -118,32 +128,72 @@ def map_sentences_to_paragraphs(key_sentences, paragraphs):
 - 自动回退机制
 - 详细的错误日志
 
+## 保存模式详解 🆕
+
+### 三种保存模式对比
+
+| 模式 | 内容保留 | 质量 | 性能 | 适用场景 |
+|------|----------|------|------|----------|
+| **strict** | 20-40% | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | 成本敏感，需要高度精炼 |
+| **balanced** | 40-60% | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | 平衡质量和成本（默认） |
+| **preserve** | 70-90% | ⭐⭐⭐ | ⭐⭐⭐ | 保留更多原文，重要信息不丢失 |
+
+### Preserve 模式工作原理
+
+1. **关键句识别**：使用 LexRank/TextRank 找出重要句子
+2. **段落评分**：统计每个段落包含的关键句数量
+3. **智能保留**：
+   - 优先保留包含关键句的段落
+   - 按保留比例补充其他段落
+   - 保持原文顺序和连贯性
+4. **重要性标记**：在结果中标记哪些段落包含关键句
+
+### 保留比例说明
+
+```bash
+# 保守策略 - 保留更多内容，适合重要文档
+SUMY_PRESERVE_RATIO=0.9
+
+# 平衡策略 - 保留大部分内容（推荐）
+SUMY_PRESERVE_RATIO=0.8
+
+# 激进策略 - 保留关键内容，节省成本
+SUMY_PRESERVE_RATIO=0.6
+```
+
 ## 配置调优
 
 ### 针对不同内容类型
 
-**新闻文章**：
+**新闻文章（保留更多信息）**：
 ```bash
 SUMY_ALGORITHM=lexrank
+SUMY_PRESERVE_MODE=preserve
+SUMY_PRESERVE_RATIO=0.8
 SUMY_MAX_SENTENCES=10
-SUMY_TOP_K_PARAGRAPHS=5
-SUMY_CONTEXT_WINDOW=1
 ```
 
-**技术博客**：
+**技术博客（平衡模式）**：
 ```bash
 SUMY_ALGORITHM=textrank
-SUMY_MAX_SENTENCES=8
+SUMY_PRESERVE_MODE=balanced
 SUMY_TOP_K_PARAGRAPHS=4
 SUMY_CONTEXT_WINDOW=2
 ```
 
-**学术论文**：
+**学术论文（保守保留）**：
 ```bash
 SUMY_ALGORITHM=lexrank
+SUMY_PRESERVE_MODE=preserve
+SUMY_PRESERVE_RATIO=0.9
 SUMY_MAX_SENTENCES=12
-SUMY_TOP_K_PARAGRAPHS=6
-SUMY_CONTEXT_WINDOW=1
+```
+
+**社交媒体/短文（严格模式）**：
+```bash
+SUMY_ALGORITHM=textrank
+SUMY_PRESERVE_MODE=strict
+SUMY_TOP_K_PARAGRAPHS=3
 ```
 
 ### 性能 vs 质量权衡
@@ -172,13 +222,33 @@ python setup_sumy.py
 - ✅ 集成API测试
 - ✅ 错误处理测试
 
+## 数据存储说明
+
+### 存储策略
+- **`text` 字段**：存储 Sumy 预处理后的关键内容（不是原始文本）
+- **`summary` 字段**：存储基于预处理内容的 LLM 摘要
+- **预处理信息**：仅记录在日志中，不存储到数据库，减少存储开销
+
+### 数据库字段
+```sql
+-- insight_contents 表结构（简化）
+CREATE TABLE insight_contents (
+    insight_id UUID,
+    text TEXT,        -- Sumy 预处理后的关键内容
+    summary TEXT,     -- LLM 生成的摘要
+    -- 其他字段...
+    -- 注意：没有 sumy_processing 字段
+);
+```
+
 ## 监控与日志
 
 ### 关键日志
 ```
-INFO - 尝试使用 Sumy 生成摘要
-INFO - Sumy 摘要生成成功，方法: sumy, 段落数: 4, 关键句数: 8
-WARNING - Sumy 摘要生成失败，回退到 LLM 摘要: [错误信息]
+INFO - 开始 Sumy 内容预处理，原文本长度: 15000
+INFO - Sumy 预处理成功: 15000 → 12000 (压缩率: 80%, 模式: preserve)
+INFO - Sumy 预处理已应用 - 方法: sumy_preserve, 算法: lexrank, 压缩率: 80%, 段落数: 8
+INFO - 即将写入 insight_contents - summary 长度: 245, text 长度: 12000
 ```
 
 ### 性能指标
