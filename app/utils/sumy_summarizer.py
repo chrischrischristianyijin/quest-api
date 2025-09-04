@@ -452,7 +452,7 @@ def extract_key_content_with_sumy(
         # 4. 根据保存模式处理内容
         if preserve_mode == "preserve":
             # 保存模式：保留更多原文，标记重要句子
-            preserve_ratio = float(os.getenv('SUMY_PRESERVE_RATIO', '0.8'))
+            preserve_ratio = float(os.getenv('SUMY_PRESERVE_RATIO', '0.5'))
             processed_text, paragraphs_info = _create_preserve_mode_content(
                 paragraphs, key_sentences, paragraph_scores, preserve_ratio
             )

@@ -51,7 +51,7 @@ export SUMY_ALGORITHM=lexrank        # 算法选择 (lexrank/textrank)
 
 # 保存模式配置 🆕
 export SUMY_PRESERVE_MODE=preserve   # 保存模式 (strict/balanced/preserve)
-export SUMY_PRESERVE_RATIO=0.8       # 保存模式下的保留比例 (0.1-1.0)
+export SUMY_PRESERVE_RATIO=0.5       # 保存模式下的保留比例 (0.1-1.0)
 
 # LLM 摘要配置（处理预处理后的内容）
 export SUMMARY_ENABLED=1
@@ -136,7 +136,7 @@ def map_sentences_to_paragraphs(key_sentences, paragraphs):
 |------|----------|------|------|----------|
 | **strict** | 20-40% | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | 成本敏感，需要高度精炼 |
 | **balanced** | 40-60% | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | 平衡质量和成本（默认） |
-| **preserve** | 70-90% | ⭐⭐⭐ | ⭐⭐⭐ | 保留更多原文，重要信息不丢失 |
+| **preserve** | 30-70% | ⭐⭐⭐⭐ | ⭐⭐⭐ | 保留关键信息，可调节保留比例 |
 
 ### Preserve 模式工作原理
 
@@ -152,25 +152,25 @@ def map_sentences_to_paragraphs(key_sentences, paragraphs):
 
 ```bash
 # 保守策略 - 保留更多内容，适合重要文档
-SUMY_PRESERVE_RATIO=0.9
+SUMY_PRESERVE_RATIO=0.7
 
-# 平衡策略 - 保留大部分内容（推荐）
-SUMY_PRESERVE_RATIO=0.8
+# 平衡策略 - 保留核心内容（推荐）
+SUMY_PRESERVE_RATIO=0.5
 
 # 激进策略 - 保留关键内容，节省成本
-SUMY_PRESERVE_RATIO=0.6
+SUMY_PRESERVE_RATIO=0.3
 ```
 
 ## 配置调优
 
 ### 针对不同内容类型
 
-**新闻文章（保留更多信息）**：
+**新闻文章（平衡模式）**：
 ```bash
 SUMY_ALGORITHM=lexrank
 SUMY_PRESERVE_MODE=preserve
-SUMY_PRESERVE_RATIO=0.8
-SUMY_MAX_SENTENCES=10
+SUMY_PRESERVE_RATIO=0.5
+SUMY_MAX_SENTENCES=8
 ```
 
 **技术博客（平衡模式）**：
@@ -181,12 +181,12 @@ SUMY_TOP_K_PARAGRAPHS=4
 SUMY_CONTEXT_WINDOW=2
 ```
 
-**学术论文（保守保留）**：
+**学术论文（重要内容保留）**：
 ```bash
 SUMY_ALGORITHM=lexrank
 SUMY_PRESERVE_MODE=preserve
-SUMY_PRESERVE_RATIO=0.9
-SUMY_MAX_SENTENCES=12
+SUMY_PRESERVE_RATIO=0.6
+SUMY_MAX_SENTENCES=10
 ```
 
 **社交媒体/短文（严格模式）**：
@@ -314,4 +314,28 @@ Sumy 内容预处理集成为 Quest API 提供了：
  HTML文本   规范化文本    关键段落    高质量摘要  最终存储
 ```
 
-通过这种设计，确保了 LLM 始终处理最相关的内容，提高了摘要质量的同时降低了成本。
+## 💡 推荐配置
+
+### 实用的保留比例设置
+
+```bash
+# 🔥 推荐配置 - 平衡质量和成本
+SUMY_PRESERVE_MODE=preserve
+SUMY_PRESERVE_RATIO=0.5       # 保留 50% 内容，节省 50% 成本
+
+# 💰 成本优化配置 - 最大化节省
+SUMY_PRESERVE_RATIO=0.3       # 保留 30% 内容，节省 70% 成本
+
+# 📚 重要文档配置 - 保留更多信息
+SUMY_PRESERVE_RATIO=0.7       # 保留 70% 内容，节省 30% 成本
+```
+
+### 📊 成本效果对比
+
+| 保留比例 | 成本节省 | 信息保留 | 适用场景 |
+|----------|----------|----------|----------|
+| 30% | 💰💰💰 70% | ⭐⭐⭐ | 批量处理，成本敏感 |
+| 50% | 💰💰 50% | ⭐⭐⭐⭐ | **日常使用（推荐）** |
+| 70% | 💰 30% | ⭐⭐⭐⭐⭐ | 重要文档，质量优先 |
+
+通过这种设计，确保了 LLM 始终处理最相关的内容，既保留了关键信息又显著降低了成本。现在推荐使用 **50% 保留比例** 作为日常配置！🚀
