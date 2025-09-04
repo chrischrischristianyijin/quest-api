@@ -15,10 +15,10 @@ def install_dependencies():
     try:
         import subprocess
         
-        logger.info("安装 Sumy 和 NLTK...")
+        logger.info("安装 NumPy, Sumy 和 NLTK...")
         result = subprocess.run([
             sys.executable, '-m', 'pip', 'install', 
-            'sumy==0.11.0', 'nltk==3.8.1'
+            'numpy==1.26.4', 'sumy==0.11.0', 'nltk==3.8.1', 'scikit-learn==1.4.2'
         ], capture_output=True, text=True)
         
         if result.returncode == 0:

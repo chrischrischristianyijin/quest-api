@@ -83,7 +83,7 @@ def apply_curator(html: Optional[str], text: Optional[str]) -> Optional[Dict[str
         # 3) 质量过滤
         try:
             min_chars = int(_get_numbers('CURATOR_MIN_CHARS', 200))
-            max_chars = int(_get_numbers('CURATOR_MAX_CHARS', 120000))
+            max_chars = int(_get_numbers('CURATOR_MAX_CHARS', 500000))
             max_url_density = _get_numbers('CURATOR_MAX_URL_DENSITY', 0.15)
             max_repeat = _get_numbers('CURATOR_MAX_REPEAT_CHAR_RATIO', 0.2)
 

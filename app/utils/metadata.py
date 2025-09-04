@@ -852,7 +852,7 @@ async def fetch_page_content(url: str) -> Dict[str, Any]:
                                     extracted_text = page_obj.get('extract') or ''
                                     break
                         if extracted_text:
-                            max_len = int(os.getenv('PAGE_TEXT_MAX_LEN', '120000') or '120000')
+                            max_len = int(os.getenv('PAGE_TEXT_MAX_LEN', '500000') or '500000')
                             refined, rep = refine_extracted_text_with_report(extracted_text)
                             text = _normalize_text(refined, max_len=max_len)
                             refine_report = rep
@@ -877,7 +877,7 @@ async def fetch_page_content(url: str) -> Dict[str, Any]:
                             for tag in soup(['script', 'style', 'noscript']):
                                 tag.decompose()
                             extracted_text = soup.get_text('\n', strip=True)
-                            max_len = int(os.getenv('PAGE_TEXT_MAX_LEN', '120000') or '120000')
+                            max_len = int(os.getenv('PAGE_TEXT_MAX_LEN', '500000') or '500000')
                             text = _normalize_text(extracted_text, max_len=max_len)
                         except Exception:
                             text = None
@@ -896,7 +896,7 @@ async def fetch_page_content(url: str) -> Dict[str, Any]:
                             article_soup = BeautifulSoup(cleaned_html, 'html.parser')
                             extracted_text = article_soup.get_text('\n', strip=True)
                             if extracted_text:
-                                max_len = int(os.getenv('PAGE_TEXT_MAX_LEN', '120000') or '120000')
+                                max_len = int(os.getenv('PAGE_TEXT_MAX_LEN', '500000') or '500000')
                                 refined, rep = refine_extracted_text_with_report(extracted_text)
                                 text = _normalize_text(refined, max_len=max_len)
                                 refine_report = rep
@@ -914,7 +914,7 @@ async def fetch_page_content(url: str) -> Dict[str, Any]:
                             target_soup = BeautifulSoup(cleaned_html, 'html.parser')
                             extracted_text = target_soup.get_text(separator='\n', strip=True)
                             if extracted_text:
-                                max_len = int(os.getenv('PAGE_TEXT_MAX_LEN', '120000') or '120000')
+                                max_len = int(os.getenv('PAGE_TEXT_MAX_LEN', '500000') or '500000')
                                 refined, rep = refine_extracted_text_with_report(extracted_text)
                                 text = _normalize_text(refined, max_len=max_len)
                                 refine_report = rep
@@ -937,13 +937,13 @@ async def fetch_page_content(url: str) -> Dict[str, Any]:
                         refine_report = (refine_report or {})
                         refine_report['curation_info'] = curated.get('curation_info')
                     else:
-                        max_len = int(os.getenv('PAGE_TEXT_MAX_LEN', '120000') or '120000')
+                                                        max_len = int(os.getenv('PAGE_TEXT_MAX_LEN', '500000') or '500000')
                         refined, rep = refine_extracted_text_with_report(raw_text)
                         text = _normalize_text(refined, max_len=max_len)
                         refine_report = rep
                 else:
                     refined, rep = refine_extracted_text_with_report(raw_text)
-                    text = _normalize_text(refined, max_len=int(os.getenv('PAGE_TEXT_MAX_LEN', '120000') or '120000'))
+                    text = _normalize_text(refined, max_len=int(os.getenv('PAGE_TEXT_MAX_LEN', '500000') or '500000'))
                     refine_report = rep
                 html = None
             else:
@@ -959,7 +959,7 @@ async def fetch_page_content(url: str) -> Dict[str, Any]:
                                 tf.write(raw)
                                 tf.flush()
                                 pdf_text = pdf_extract_text(tf.name) or ''
-                            max_len = int(os.getenv('PAGE_TEXT_MAX_LEN', '120000') or '120000')
+                            max_len = int(os.getenv('PAGE_TEXT_MAX_LEN', '500000') or '500000')
                             refined, rep = refine_extracted_text_with_report(pdf_text)
                             text = _normalize_text(refined, max_len=max_len)
                             refine_report = rep
@@ -983,7 +983,7 @@ async def fetch_page_content(url: str) -> Dict[str, Any]:
                     if vid and YouTubeTranscriptApi:
                         transcript_text = await _fetch_youtube_transcript_async(vid)
                         if transcript_text:
-                            max_len = int(os.getenv('PAGE_TEXT_MAX_LEN', '120000') or '120000')
+                            max_len = int(os.getenv('PAGE_TEXT_MAX_LEN', '500000') or '500000')
                             refined_tr, _ = refine_extracted_text_with_report(transcript_text)
                             norm_tr = _normalize_text(refined_tr, max_len=max_len)
                             text = (text + '\n\n' if text else '') + norm_tr

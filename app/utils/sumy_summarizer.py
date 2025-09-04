@@ -401,8 +401,41 @@ def extract_key_content_with_sumy(
             return None
         
         if not _check_sumy_available():
-            logger.warning("Sumy 不可用，跳过 Sumy 摘要")
-            return None
+            logger.warning("Sumy 不可用，使用简单段落筛选")
+            # 回退到简单的段落筛选
+            paragraphs = _clean_and_split_paragraphs(text)
+            if not paragraphs:
+                return None
+            
+            # 选择前几个段落，控制总长度
+            max_length = int(os.getenv('SUMY_FALLBACK_MAX_LENGTH', '100000'))
+            selected = []
+            current_length = 0
+            
+            for para in paragraphs:
+                if current_length + len(para) > max_length:
+                    break
+                selected.append(para)
+                current_length += len(para)
+            
+            processed_text = "\n\n".join(selected)
+            return {
+                "processed_text": processed_text,
+                "original_length": len(text),
+                "processed_length": len(processed_text),
+                "compression_ratio": len(processed_text) / len(text) if text else 0,
+                "method": "fallback_simple",
+                "paragraphs_count": len(selected),
+                "key_sentences_count": 0,
+                "algorithm": "none",
+                "preserve_mode": preserve_mode,
+                "key_sentences": [],
+                "paragraphs_info": [
+                    {"index": i, "score": 0.0, "length": len(para), 
+                     "is_key": False, "included": True}
+                    for i, para in enumerate(selected)
+                ]
+            }
         
         logger.info(f"开始 Sumy 摘要生成，算法: {algorithm}")
         

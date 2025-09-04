@@ -35,7 +35,7 @@
 python setup_sumy.py
 
 # 手动安装
-pip install sumy==0.11.0 nltk==3.8.1
+pip install numpy==1.26.4 sumy==0.11.0 nltk==3.8.1 scikit-learn==1.4.2
 ```
 
 ### 2. 环境变量配置
@@ -52,6 +52,11 @@ export SUMY_ALGORITHM=lexrank        # 算法选择 (lexrank/textrank)
 # 保存模式配置 🆕
 export SUMY_PRESERVE_MODE=preserve   # 保存模式 (strict/balanced/preserve)
 export SUMY_PRESERVE_RATIO=0.5       # 保存模式下的保留比例 (0.1-1.0)
+
+# 长度控制配置 🆕
+export PAGE_TEXT_MAX_LEN=500000      # 原文本最大长度（清洗前，默认 500k）
+export SUMY_FALLBACK_MAX_LENGTH=100000  # Sumy 不可用时的回退长度（默认 100k）
+export CURATOR_MAX_CHARS=500000     # Curator 最大字符数限制（默认 500k）
 
 # LLM 摘要配置（处理预处理后的内容）
 export SUMMARY_ENABLED=1

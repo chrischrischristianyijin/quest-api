@@ -567,13 +567,8 @@ class InsightsService:
             cleaned_text = raw_text.strip()
             if cleaned_text:
                 cleaned_text = re.sub(r"\s+", " ", cleaned_text)
-                # 限长，避免超出模型输入限制（与 SUMMARY_INPUT_CHAR_LIMIT 对齐）
-                try:
-                    input_limit = int(os.getenv('SUMMARY_INPUT_CHAR_LIMIT', '16000') or '16000')
-                except Exception:
-                    input_limit = 16000
-                if len(cleaned_text) > input_limit:
-                    cleaned_text = cleaned_text[:input_limit]
+                # 注意：不在这里截断文本，让 Sumy 预处理来控制长度
+                # Sumy 会智能选择关键内容，比简单截断更好
             logger.info(f"[后台任务] 清理后文本长度: {len(cleaned_text) if cleaned_text else 0}")
 
             # 3. 生成摘要（基于清理后的文本）
