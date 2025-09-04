@@ -3,7 +3,7 @@ services:
     name: quest-api
     env: python
     plan: free
-    buildCommand: pip install -r requirements.txt
+    buildCommand: ./build.sh
     startCommand: python start_production.py
     envVars:
       - key: SUPABASE_URL
@@ -58,7 +58,7 @@ services:
       - key: CURATOR_MIN_CHARS
         value: 200
       - key: CURATOR_MAX_CHARS
-        value: 120000
+        value: 500000
       - key: CURATOR_MAX_URL_DENSITY
         value: 0.15
       - key: CURATOR_MAX_REPEAT_CHAR_RATIO
@@ -67,6 +67,21 @@ services:
         value: false
       - key: CURATOR_TOKENIZER
         value: bert-base-multilingual-cased
+      # Sumy 预处理配置
+      - key: SUMY_PREPROCESSING_ENABLED
+        value: true
+      - key: SUMY_ALGORITHM
+        value: lexrank
+      - key: SUMY_MAX_SENTENCES
+        value: 10
+      - key: SUMY_PRESERVE_MODE
+        value: balanced
+      - key: SUMY_PRESERVE_RATIO
+        value: 0.5
+      - key: SUMY_FALLBACK_MAX_LENGTH
+        value: 100000
+      - key: PAGE_TEXT_MAX_LEN
+        value: 500000
       # 性能优化配置
       - key: MAX_INSIGHTS_LIMIT
         value: 1000

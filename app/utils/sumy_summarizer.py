@@ -18,6 +18,11 @@ def _check_sumy_available() -> bool:
         return _SUMY_AVAILABLE
     
     try:
+        # 首先检查 numpy
+        import numpy
+        logger.debug(f"NumPy 版本: {numpy.__version__}")
+        
+        # 然后检查 sumy
         from sumy.parsers.plaintext import PlaintextParser
         from sumy.nlp.tokenizers import Tokenizer
         from sumy.summarizers.lex_rank import LexRankSummarizer
@@ -27,7 +32,11 @@ def _check_sumy_available() -> bool:
         return True
     except ImportError as e:
         _SUMY_AVAILABLE = False
-        logger.warning(f"Sumy 库不可用: {e}")
+        logger.warning(f"Sumy 库不可用 (这是正常的，系统会使用简单的文本筛选): {e}")
+        return False
+    except Exception as e:
+        _SUMY_AVAILABLE = False
+        logger.warning(f"Sumy 库检查失败 (这是正常的，系统会使用简单的文本筛选): {e}")
         return False
 
 
