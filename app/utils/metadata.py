@@ -426,7 +426,7 @@ def _normalize_text(text: Optional[str], max_len: Optional[int] = None) -> str:
             else:
                 compact.append(ln)
                 blank = False
-        s = '\n'.join(compact).strip()
+        s = '\n\n'.join(compact).strip()
         if max_len is not None and max_len > 0:
             s = s[:max_len]
         return s

@@ -127,8 +127,23 @@ def _clean_and_split_paragraphs(text: str) -> List[str]:
         # 规范化Unicode
         text = unicodedata.normalize('NFKC', text)
         
-        # 按双换行分割段落
-        paragraphs = re.split(r'\n\s*\n', text.strip())
+        # 多种段落分割策略
+        paragraphs = []
+        
+        # 策略1：按双换行分割
+        double_newline_paras = re.split(r'\n\s*\n', text.strip())
+        
+        # 策略2：按单换行分割（如果双换行分割结果太少）
+        if len(double_newline_paras) <= 2:
+            single_newline_paras = re.split(r'\n+', text.strip())
+            # 过滤太短的段落
+            single_newline_paras = [p.strip() for p in single_newline_paras if len(p.strip()) >= 20]
+            if len(single_newline_paras) > len(double_newline_paras):
+                paragraphs = single_newline_paras
+            else:
+                paragraphs = double_newline_paras
+        else:
+            paragraphs = double_newline_paras
         
         # 清理每个段落
         cleaned_paragraphs = []
@@ -146,6 +161,7 @@ def _clean_and_split_paragraphs(text: str) -> List[str]:
             if len(para) >= 20:
                 cleaned_paragraphs.append(para)
         
+        logger.debug(f"段落分割结果: {len(cleaned_paragraphs)} 个段落")
         return cleaned_paragraphs
     except Exception as e:
         logger.warning(f"段落分割失败: {e}")

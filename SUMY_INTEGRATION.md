@@ -55,7 +55,25 @@ pip install "numpy>=1.21.0,<2.0.0" "sumy>=0.10.0" "nltk>=3.7" "packaging>=20.0"
 NLTK 数据初始化完成
 ```
 
-### 4. 环境变量配置
+### 5. 文本分段和压缩优化
+
+**问题**：Sumy 可能因为文本分段不当或参数设置不合理导致压缩率过高。
+
+**解决方案**：
+- ✅ **文本分段优化**：使用 `\n\n` 分隔段落，支持多种分割策略
+- ✅ **句子数量限制**：限制提取的关键句数量为总句子的 50%
+- ✅ **参数调优**：默认提取 5 个关键句，选择 3 个顶级段落
+- ✅ **智能回退**：如果段落分割失败，使用单换行分割
+
+**推荐配置**：
+```bash
+SUMY_MAX_SENTENCES=10         # 提取的关键句数量
+SUMY_TOP_K_PARAGRAPHS=4      # 选择的顶级段落数量
+SUMY_PRESERVE_MODE=balanced   # 平衡模式
+SUMY_PRESERVE_RATIO=0.5      # 保存比例
+```
+
+### 6. 环境变量配置
 ```bash
 # 启用 Sumy 预处理（默认启用）
 export SUMY_PREPROCESSING_ENABLED=1

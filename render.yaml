@@ -72,6 +72,8 @@ services:
         value: true
       - key: SUMY_ALGORITHM
         value: lexrank
+      - key: SUMY_TOP_K_PARAGRAPHS
+        value: 4
       - key: SUMY_MAX_SENTENCES
         value: 10
       - key: SUMY_PRESERVE_MODE
