@@ -82,6 +82,8 @@ services:
         value: 100000
       - key: PAGE_TEXT_MAX_LEN
         value: 500000
+      - key: NLTK_DATA
+        value: /opt/render/nltk_data
       # 性能优化配置
       - key: MAX_INSIGHTS_LIMIT
         value: 1000

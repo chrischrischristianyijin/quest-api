@@ -48,16 +48,44 @@ def _ensure_nltk_data():
     
     try:
         import nltk
-        # 尝试使用 punkt，如果失败则下载
+        from packaging.version import Version
+        
+        # 设置 NLTK 数据路径（兼容 Render 环境）
+        nltk_data_paths = [
+            '/opt/render/nltk_data',  # Render 环境
+            os.path.expanduser('~/nltk_data'),  # 用户目录
+            '/usr/local/nltk_data',  # 系统目录
+        ]
+        
+        for path in nltk_data_paths:
+            if os.path.exists(path):
+                nltk.data.path.append(path)
+                logger.debug(f"添加 NLTK 数据路径: {path}")
+        
+        # 检查并下载 punkt
         try:
             nltk.data.find('tokenizers/punkt')
+            logger.debug("punkt 数据已存在")
         except LookupError:
             logger.info("下载 NLTK punkt 数据...")
             nltk.download('punkt', quiet=True)
         
-        # 尝试下载中文停用词（如果需要）
+        # NLTK 3.8+ 需要 punkt_tab
+        try:
+            if Version(nltk.__version__) >= Version('3.8'):
+                nltk.data.find('tokenizers/punkt_tab')
+                logger.debug("punkt_tab 数据已存在")
+            else:
+                logger.debug("NLTK 版本 < 3.8，跳过 punkt_tab")
+        except LookupError:
+            if Version(nltk.__version__) >= Version('3.8'):
+                logger.info("下载 NLTK punkt_tab 数据...")
+                nltk.download('punkt_tab', quiet=True)
+        
+        # 检查 stopwords
         try:
             nltk.data.find('corpora/stopwords')
+            logger.debug("stopwords 数据已存在")
         except LookupError:
             logger.info("下载 NLTK stopwords 数据...")
             nltk.download('stopwords', quiet=True)
@@ -66,6 +94,7 @@ def _ensure_nltk_data():
         logger.info("NLTK 数据初始化完成")
     except Exception as e:
         logger.warning(f"NLTK 数据初始化失败: {e}")
+        # 不设置 _NLTK_INITIALIZED = True，这样下次还会尝试
 
 
 def _detect_language(text: str) -> str:

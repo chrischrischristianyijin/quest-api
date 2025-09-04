@@ -35,10 +35,27 @@
 python setup_sumy.py
 
 # 手动安装
-pip install "numpy>=1.21.0,<2.0.0" "sumy>=0.10.0" "nltk>=3.7"
+pip install "numpy>=1.21.0,<2.0.0" "sumy>=0.10.0" "nltk>=3.7" "packaging>=20.0"
 ```
 
-### 2. 环境变量配置
+### 3. NLTK 数据问题解决
+
+**问题**：NLTK 3.8+ 版本将部分语言数据拆分到 `punkt_tab`，导致 Sumy 句子切分失败。
+
+**解决方案**：
+- ✅ 构建时自动下载 `punkt` 和 `punkt_tab` 数据
+- ✅ 设置 `NLTK_DATA` 环境变量指向可写目录
+- ✅ 兼容 NLTK 3.8+ 版本检查
+
+**预期日志**：
+```
+📚 初始化 NLTK 数据...
+下载 NLTK punkt 数据...
+下载 NLTK punkt_tab 数据...
+NLTK 数据初始化完成
+```
+
+### 4. 环境变量配置
 ```bash
 # 启用 Sumy 预处理（默认启用）
 export SUMY_PREPROCESSING_ENABLED=1
