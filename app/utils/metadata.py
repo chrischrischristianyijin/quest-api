@@ -18,6 +18,15 @@ import gzip
 import bz2
 from app.utils.curator_pipeline import apply_curator
 
+# Sumy 内容预处理
+try:
+    from app.utils.sumy_summarizer import extract_key_content_with_sumy, _is_enabled as _sumy_preprocessing_enabled
+    SUMY_PREPROCESSING_AVAILABLE = True
+except ImportError:
+    SUMY_PREPROCESSING_AVAILABLE = False
+    extract_key_content_with_sumy = None
+    _sumy_preprocessing_enabled = lambda: False
+
 try:
     from youtube_transcript_api import YouTubeTranscriptApi
 except Exception:
@@ -56,7 +65,7 @@ async def extract_metadata_from_url(url: str) -> Dict[str, Any]:
     try:
         host = urlparse(url).netloc.lower()
         if 'wikipedia.org' in host:
-            async with httpx.AsyncClient(timeout=8.0, proxies=_get_proxies()) as client:
+            async with httpx.AsyncClient(http2=True, timeout=8.0, proxies=_get_proxies()) as client:
                 # 将 /wiki/Title 提取出来
                 path = urlparse(url).path
                 title_part = path.split('/wiki/', 1)[1] if '/wiki/' in path else None
@@ -94,7 +103,7 @@ async def extract_metadata_from_url(url: str) -> Dict[str, Any]:
     try:
         if (os.getenv('METADATA_SIMPLE', '').lower() in ('1', 'true', 'yes')):
             _dbg(f"simple meta mode enabled url={url}")
-            async with httpx.AsyncClient(timeout=8.0, proxies=_get_proxies()) as client:
+            async with httpx.AsyncClient(http2=True, timeout=8.0, proxies=_get_proxies()) as client:
                 resp = await _get_with_retries(client, url)
                 resp.raise_for_status()
                 soup = BeautifulSoup(resp.text or '', 'html.parser')
@@ -116,7 +125,7 @@ async def extract_metadata_from_url(url: str) -> Dict[str, Any]:
         _dbg(f"simple meta mode failed, fallback url={url}")
 
     try:
-        async with httpx.AsyncClient(timeout=10.0, proxies=_get_proxies()) as client:
+        async with httpx.AsyncClient(http2=True, timeout=10.0, proxies=_get_proxies()) as client:
             # 2) 先发起一次 GET（带上 If-None-Match / If-Modified-Since）以获取页面结构
             extra_headers: Dict[str, str] = {}
             if cached:
@@ -152,7 +161,7 @@ async def extract_metadata_from_url(url: str) -> Dict[str, Any]:
             # 可选富化：当标题或描述欠缺时，尝试 oEmbed / RSS / 域适配器
             try:
                 if os.getenv('METADATA_ENRICH', '').lower() in ('1', 'true', 'yes'):
-                    async with httpx.AsyncClient(timeout=6.0, proxies=_get_proxies()) as enrich_client:
+                    async with httpx.AsyncClient(http2=True, timeout=6.0, proxies=_get_proxies()) as enrich_client:
                         enriched: Dict[str, Any] = {}
                         if (not title) or len(title) < 8:
                             enriched = await _try_oembed(url, soup, enrich_client) or enriched
@@ -729,7 +738,7 @@ def _build_headers(url: str, extra: Optional[Dict[str, str]] = None) -> Dict[str
     headers: Dict[str, str] = {
         'User-Agent': random.choice(UA_LIST),
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7',
+        'Accept-Language': 'en-US,en;q=0.9,zh-CN;q=0.8',
         'Accept-Encoding': 'gzip, deflate, br',
         'Cache-Control': 'no-cache',
         'Connection': 'keep-alive',
@@ -753,7 +762,17 @@ async def _get_with_retries(
     while attempt <= max_retries:
         try:
             headers = _build_headers(url, extra_headers)
-            return await client.get(url, headers=headers, follow_redirects=True)
+            response = await client.get(url, headers=headers, follow_redirects=True)
+            
+            # 内容类型预检查 - 确保是文本类型
+            content_type = response.headers.get("Content-Type", "").lower()
+            if not any(ct in content_type for ct in ["text/html", "application/xhtml+xml", "application/json", "text/"]):
+                if "application/pdf" in content_type:
+                    raise ValueError(f"PDF content detected: {content_type}")
+                elif any(ct in content_type for ct in ["image/", "video/", "audio/"]):
+                    raise ValueError(f"Non-text content: {content_type}")
+            
+            return response
         except (httpx.RequestError, httpx.HTTPStatusError) as exc:
             last_exc = exc
             # 对明显的临时性错误做重试
@@ -777,7 +796,7 @@ async def fetch_page_content(url: str) -> Dict[str, Any]:
     返回: { html: str | None, text: str | None, content_type: str | None, extracted_at: iso str }
     """
     try:
-        async with httpx.AsyncClient(timeout=15.0, proxies=_get_proxies()) as client:
+        async with httpx.AsyncClient(http2=True, timeout=15.0, proxies=_get_proxies()) as client:
             resp = await _get_with_retries(client, url, max_retries=2, base_delay=0.6)
             resp.raise_for_status()
 
@@ -988,6 +1007,56 @@ async def fetch_page_content(url: str) -> Dict[str, Any]:
                         refine_report = {}
                     refine_report['curation_info'] = curated.get('curation_info')
 
+            # Sumy 内容预处理：提取关键段落
+            sumy_processing_info = None
+            if text and SUMY_PREPROCESSING_AVAILABLE and _sumy_preprocessing_enabled():
+                try:
+                    _dbg(f"开始 Sumy 内容预处理，原文本长度: {len(text)}")
+                    
+                    # 获取 Sumy 配置
+                    max_sentences = int(os.getenv('SUMY_MAX_SENTENCES', '8') or '8')
+                    top_k_paragraphs = int(os.getenv('SUMY_TOP_K_PARAGRAPHS', '4') or '4')
+                    context_window = int(os.getenv('SUMY_CONTEXT_WINDOW', '1') or '1')
+                    algorithm = os.getenv('SUMY_ALGORITHM', 'lexrank').lower()
+                    preserve_mode = os.getenv('SUMY_PRESERVE_MODE', 'balanced').lower()
+                    
+                    sumy_result = extract_key_content_with_sumy(
+                        text=text,
+                        max_sentences=max_sentences,
+                        top_k_paragraphs=top_k_paragraphs,
+                        context_window=context_window,
+                        algorithm=algorithm,
+                        preserve_mode=preserve_mode
+                    )
+                    
+                    if sumy_result and sumy_result.get('processed_text'):
+                        processed_text = sumy_result['processed_text'].strip()
+                        if processed_text:
+                            _dbg(f"Sumy 预处理成功: {sumy_result.get('original_length')} → {sumy_result.get('processed_length')} "
+                                f"(压缩率: {sumy_result.get('compression_ratio', 0):.2%}, 模式: {preserve_mode})")
+                            text = processed_text
+                            sumy_processing_info = {
+                                'applied': True,
+                                'method': sumy_result.get('method'),
+                                'algorithm': sumy_result.get('algorithm'),
+                                'preserve_mode': sumy_result.get('preserve_mode'),
+                                'compression_ratio': sumy_result.get('compression_ratio'),
+                                'paragraphs_count': sumy_result.get('paragraphs_count'),
+                                'key_sentences_count': sumy_result.get('key_sentences_count'),
+                                'key_sentences': sumy_result.get('key_sentences', [])  # 保存关键句子
+                            }
+                        else:
+                            _dbg("Sumy 预处理结果为空，保持原文本")
+                    else:
+                        _dbg("Sumy 预处理未产出结果，保持原文本")
+                        
+                except Exception as sumy_err:
+                    _dbg(f"Sumy 预处理失败: {sumy_err}")
+                    # 保持原文本不变
+                    
+            if sumy_processing_info is None:
+                sumy_processing_info = {'applied': False, 'reason': 'disabled_or_unavailable'}
+
             # 全局策略：不再返回 HTML 内容
             html = None
 
@@ -1001,6 +1070,7 @@ async def fetch_page_content(url: str) -> Dict[str, Any]:
                 'blocked_reason': blocked_reason,
                 'refine_version': REFINE_VERSION,
                 'refine_report': refine_report,
+                'sumy_processing': sumy_processing_info,
             }
     except Exception:
         return {

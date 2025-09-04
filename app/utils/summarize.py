@@ -1,10 +1,13 @@
-from typing import Optional
+from typing import Optional, Dict, Any
 import os
 import logging
 import httpx
 import re
 
 logger = logging.getLogger(__name__)
+
+# 注意：Sumy 现在作为内容预处理步骤在 metadata.py 中处理
+# 此处不再需要 Sumy 摘要备选逻辑
 
 
 def _enabled() -> bool:
@@ -24,6 +27,9 @@ async def generate_summary(text: str) -> Optional[str]:
     - OPENAI_API_KEY / OPENAI_BASE_URL: 兼容 OpenAI 风格接口
     - SUMMARY_MAX_TOKENS: 输出上限（默认 1200）
     - SUMMARY_INPUT_CHAR_LIMIT: 输入截断（默认 16000）
+    
+    注意：输入的 text 已经过 Sumy 预处理（关键段落提取），
+    因此可以直接用于 LLM 摘要，无需额外的内容筛选。
     """
     try:
         if not _enabled():
@@ -31,6 +37,11 @@ async def generate_summary(text: str) -> Optional[str]:
 
         if not text or len(text.strip()) == 0:
             return None
+
+        # 注意：此时的 text 已经过 Sumy 预处理，包含了关键段落内容
+        logger.info(f"开始 LLM 摘要生成，输入文本长度: {len(text)}")
+
+        # LLM 摘要流程
 
         provider = (os.getenv('SUMMARY_PROVIDER') or 'openai').lower()
         model = os.getenv('SUMMARY_MODEL') or 'gpt-4o-mini'

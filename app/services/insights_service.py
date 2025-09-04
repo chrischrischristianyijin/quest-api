@@ -614,22 +614,35 @@ class InsightsService:
             extracted_at_val = page.get('extracted_at')
             if isinstance(extracted_at_val, (datetime, date)):
                 extracted_at_val = extracted_at_val.isoformat()
+            # 获取 Sumy 预处理信息
+            sumy_processing = page.get('sumy_processing', {})
+            
             content_payload = {
                 'insight_id': str(insight_id),
                 'user_id': str(user_id),
                 'url': url,
-                'html': page.get('html'),
-                'text': page.get('text'),
+                'text': page.get('text'),  # 这里的 text 已经是 Sumy 预处理后的内容
                 'markdown': page.get('markdown'),
                 'content_type': page.get('content_type'),
                 'extracted_at': extracted_at_val,
                 'summary': summary_text,
-                'thought': thought  # 保存用户的想法/备注到insight_contents表
+                'thought': thought,  # 保存用户的想法/备注到insight_contents表
+                'sumy_processing': sumy_processing  # 保存 Sumy 预处理信息
             }
 
-            # 记录摘要长度，便于排查是否为空
+            # 记录处理信息
             try:
-                logger.info(f"即将写入 insight_contents.summary 长度: {len(summary_text) if summary_text else 0}")
+                logger.info(f"即将写入 insight_contents - summary 长度: {len(summary_text) if summary_text else 0}, "
+                          f"text 长度: {len(page.get('text') or '')}")
+                
+                # 记录 Sumy 预处理信息
+                if sumy_processing.get('applied'):
+                    logger.info(f"Sumy 预处理已应用 - 方法: {sumy_processing.get('method')}, "
+                              f"算法: {sumy_processing.get('algorithm')}, "
+                              f"压缩率: {sumy_processing.get('compression_ratio', 0):.2%}, "
+                              f"段落数: {sumy_processing.get('paragraphs_count')}")
+                else:
+                    logger.info(f"Sumy 预处理未应用 - 原因: {sumy_processing.get('reason', 'unknown')}")
             except Exception:
                 pass
 
