@@ -35,7 +35,7 @@
 python setup_sumy.py
 
 # 手动安装
-pip install numpy==1.26.4 sumy==0.11.0 nltk==3.8.1 scikit-learn==1.4.2
+pip install "numpy>=1.21.0,<2.0.0" sumy==0.11.0 nltk==3.8.1 "scikit-learn>=1.3.0,<1.5.0"
 ```
 
 ### 2. 环境变量配置
