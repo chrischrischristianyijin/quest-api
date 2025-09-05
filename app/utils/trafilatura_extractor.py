@@ -144,7 +144,7 @@ def extract_content_with_trafilatura(
             return None
         
         # 提取元数据
-        metadata = trafilatura.extract_metadata(html, url=url)
+        metadata = trafilatura.extract_metadata(html)
         
         # 构建结果
         result = {
