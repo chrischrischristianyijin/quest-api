@@ -45,28 +45,7 @@ services:
       - key: SUMMARY_TEMPERATURE
         value: 0.3
       # OPENAI_API_KEY 和 OPENAI_BASE_URL 需要在 Render Dashboard 中手动配置
-      - key: CURATOR_ENABLED
-        value: true
-      - key: CURATOR_PRIMARY
-        value: true
-      - key: CURATOR_LANGS
-        value: zh,en
-      - key: CURATOR_EXACT_DEDUP
-        value: true
-      - key: CURATOR_QUALITY_THRESHOLD
-        value: 0.5
-      - key: CURATOR_MIN_CHARS
-        value: 200
-      - key: CURATOR_MAX_CHARS
-        value: 500000
-      - key: CURATOR_MAX_URL_DENSITY
-        value: 0.15
-      - key: CURATOR_MAX_REPEAT_CHAR_RATIO
-        value: 0.2
-      - key: CURATOR_USE_PII_REDACTOR
-        value: false
-      - key: CURATOR_TOKENIZER
-        value: bert-base-multilingual-cased
+      # Curator 配置已移除 - Trafilatura 更强大
       # Sumy 预处理配置
       - key: SUMY_PREPROCESSING_ENABLED
         value: true
@@ -86,6 +65,21 @@ services:
         value: 500000
       - key: NLTK_DATA
         value: /opt/render/nltk_data
+      # Trafilatura 正文提取配置
+      - key: TRAFILATURA_ENABLED
+        value: true
+      - key: TRAFILATURA_INCLUDE_COMMENTS
+        value: false
+      - key: TRAFILATURA_INCLUDE_TABLES
+        value: true
+      - key: TRAFILATURA_INCLUDE_FORMATTING
+        value: false
+      - key: TRAFILATURA_DEDUPLICATE
+        value: true
+      - key: TRAFILATURA_FAVOR_PRECISION
+        value: true
+      - key: TRAFILATURA_FAVOR_RECALL
+        value: false
       # 性能优化配置
       - key: MAX_INSIGHTS_LIMIT
         value: 1000

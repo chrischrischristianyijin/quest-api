@@ -2,21 +2,20 @@ from typing import Dict, Any, Optional, Callable
 from datetime import datetime
 from urllib.parse import urlparse, urljoin, parse_qs, unquote, quote
 import os
-import os
 import httpx
-from bs4 import BeautifulSoup, Comment
+from bs4 import BeautifulSoup
 import asyncio
 import random
-from readability import Document
+# from readability import Document  # 已被 Trafilatura 替代
 import json
 import time
 import logging
 import re
-import unicodedata
+# import unicodedata  # 不再需要，Trafilatura 内置处理
 from typing import Tuple
 import gzip
 import bz2
-from app.utils.curator_pipeline import apply_curator
+# from app.utils.curator_pipeline import apply_curator  # 已移除，Trafilatura 更强大
 
 # Sumy 内容预处理
 try:
@@ -26,6 +25,20 @@ except ImportError:
     SUMY_PREPROCESSING_AVAILABLE = False
     extract_key_content_with_sumy = None
     _sumy_preprocessing_enabled = lambda: False
+
+# Trafilatura 正文提取
+try:
+    from app.utils.trafilatura_extractor import (
+        extract_content_with_trafilatura, 
+        is_trafilatura_enabled, 
+        get_trafilatura_config
+    )
+    TRAFILATURA_AVAILABLE = True
+except ImportError:
+    TRAFILATURA_AVAILABLE = False
+    extract_content_with_trafilatura = None
+    is_trafilatura_enabled = lambda: False
+    get_trafilatura_config = lambda: {}
 
 try:
     from youtube_transcript_api import YouTubeTranscriptApi
@@ -196,28 +209,7 @@ async def extract_metadata_from_url(url: str) -> Dict[str, Any]:
             }
             _cache_set(url, response, metadata)
             _dbg(f"meta-only url={url} title_len={len(metadata['title'] or '')} desc_len={len(metadata['description'] or '')}")
-            # 若核心字段缺失，尝试 AMP 回退（CNN 等）
-            if (not metadata.get('title')) or (not metadata.get('image_url')):
-                try:
-                    amp_url = extract_amp_url(soup, url)
-                except Exception:
-                    amp_url = None
-                if amp_url and amp_url != url:
-                    try:
-                        amp_resp = await _get_with_retries(client, amp_url)
-                        amp_resp.raise_for_status()
-                        amp_soup = BeautifulSoup(amp_resp.text or '', 'html.parser')
-                        amp_title = extract_title(amp_soup) or metadata.get('title')
-                        amp_desc = extract_description(amp_soup) or metadata.get('description')
-                        amp_img = extract_image(amp_soup, amp_url) or metadata.get('image_url')
-                        metadata.update({
-                            'title': _clean_title(amp_title, extract_site_name(amp_soup), amp_url),
-                            'description': amp_desc,
-                            'image_url': amp_img,
-                            'canonical_url': extract_canonical_url(amp_soup, metadata.get('canonical_url') or url)
-                        })
-                    except Exception as amp_err:
-                        _dbg(f"amp fallback failed url={amp_url} err={amp_err}")
+            # AMP 回退逻辑已移除 - Trafilatura 自动处理各种页面变体
 
             return metadata
 
@@ -318,22 +310,7 @@ def extract_canonical_url(soup: BeautifulSoup, fallback_url: str) -> str:
     return href or fallback_url
 
 
-def extract_amp_url(soup: BeautifulSoup, fallback_url: str) -> Optional[str]:
-    try:
-        link = soup.find('link', rel=lambda r: r and ('amphtml' in r or 'AmpHTML' in r))
-        href = link.get('href') if link and link.has_attr('href') else None
-        if href:
-            return urljoin(fallback_url, href)
-        # 针对 CNN 的常见 AMP 形态
-        host = urlparse(fallback_url).netloc.lower()
-        path = urlparse(fallback_url).path or '/'
-        if 'cnn.com' in host:
-            # 优先 ?outputType=amp
-            sep = '&' if ('?' in fallback_url) else '?'
-            return fallback_url + f"{sep}outputType=amp"
-        return None
-    except Exception:
-        return None
+# extract_amp_url 函数已不再需要 - Trafilatura 自动处理各种页面变体
 
 
 def extract_site_name(soup: BeautifulSoup) -> Optional[str]:
@@ -364,316 +341,33 @@ def _clean_title(title: Optional[str], site_name: Optional[str], url: str) -> st
         return (title or '无标题')[:200]
 
 
-def _sanitize_html(html: Optional[str]) -> str:
-    """将正文 HTML 做净化：移除脚本/样式/广告容器/表单/iframe 等，并清理危险属性。"""
-    try:
-        soup = BeautifulSoup(html or '', 'html.parser')
-        # 移除注释
-        for c in soup.find_all(string=lambda t: isinstance(t, Comment)):
-            c.extract()
-        # 移除高风险或无关标签
-        for tag in soup([
-            'script', 'style', 'noscript', 'iframe', 'form', 'svg', 'canvas',
-            'video', 'audio', 'source', 'track', 'object', 'embed', 'picture',
-            'table', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th', 'pre', 'code'
-        ]):
-            tag.decompose()
-        # 根据 class/id 规则移除广告/无关容器
-        pattern = re.compile(
-            r'(ad[s]?(vert)?|sponsor|promo|cookie|gdpr|banner|breadcrumb|sidebar|nav|header|footer|share|social|subscribe|newsletter|comment|related|recommend|outbrain|taboola)',
-            re.I
-        )
-        for el in soup.find_all(True, id=pattern):
-            el.decompose()
-        for el in soup.find_all(True, class_=pattern):
-            el.decompose()
-        # 清除危险属性（事件/内联样式/数据属性），保留少量安全属性
-        allowed_attrs = {'href', 'src', 'alt', 'title'}
-        for el in soup.find_all(True):
-            attrs = dict(el.attrs)
-            for k in list(attrs.keys()):
-                if k not in allowed_attrs:
-                    del el.attrs[k]
-                # 事件处理器 on*
-                if k.lower().startswith('on'):
-                    el.attrs.pop(k, None)
-        # 规范空白：去掉多余空行
-        return str(soup)
-    except Exception:
-        return html or ''
+# _sanitize_html 函数已被 Trafilatura 内置清理替代，不再需要
 
 
-def _normalize_text(text: Optional[str], max_len: Optional[int] = None) -> str:
-    """文本规范化：
-    - Unicode NFKC（全角转半角、兼容分解）
-    - 合并多余空行
-    - 去除首尾空白
-    - 长度截断（可配置）
-    """
-    try:
-        s = (text or '')
-        # 标准化
-        s = unicodedata.normalize('NFKC', s)
-        # 统一换行并合并多余空行
-        lines = [ln.rstrip() for ln in s.splitlines()]
-        compact: list[str] = []
-        blank = False
-        for ln in lines:
-            if ln.strip() == '':
-                if not blank:
-                    compact.append('')
-                blank = True
-            else:
-                compact.append(ln)
-                blank = False
-        s = '\n\n'.join(compact).strip()
-        if max_len is not None and max_len > 0:
-            s = s[:max_len]
-        return s
-    except Exception:
-        return (text or '')[: max_len or None]
+# _normalize_text 函数已移除 - Trafilatura 内置文本规范化
 
 
 
-# -------------------- 段落细化清洗：脚注/断词/图注/空白规整 --------------------
-REFINE_VERSION = "1.3.0"
-OS_PLACEHOLDER = "<<<OS_DATE_PLACEHOLDER>>>"
-SIC_PLACEHOLDER = "<<<SIC_PLACEHOLDER>>>"
-NARROW_NBSP_GUARD = "<<<NARROW_NBSP>>>"  # U+202F 保护
-
-# 零信息脚注（含全角/中文括号变体）： [e]/[12]、［a］/［12］、【1】 等
-FOOTNOTE_RE_ASCII = re.compile(r"\s*\[(?:[a-zA-Z]|\d{1,3})\]\s*")
-FOOTNOTE_RE_FULLWIDTH = re.compile(r"\s*[\uFF3B](?:[A-Za-z]|[\uFF10-\uFF19]{1,3})[\uFF3D]\s*")
-FOOTNOTE_RE_CORNER = re.compile(r"\s*[\u3010](?:[A-Za-z]|\d{1,3})[\u3011]\s*")
-FOOTNOTE_RE_PAREN_NOTE = re.compile(r"\s*（注(?:[0-9０-９]{0,2})）\s*")
-
-# 保护 [O.S. ...] / [sic]（含全角/角括）
-PROTECT_OS_SIC = re.compile(r"[\[\uFF3B\u3010]((?:O\.S\.|sic)\s*?[^\]\uFF3D\u3011]+)[\]\uFF3D\u3011]", re.I)
-
-CAPTION_HINT = re.compile(r"\b(class photo|mugshot|first issue of pravda|figcaption)\b", re.I)
-STAGE_HINT = re.compile(r"^\[?(music|applause|laughter|silence|inaudible|crosstalk)\]?$", re.I)
-TIMESTAMP_HINT = re.compile(r"^\[?(?:\d{1,2}:\d{2}(?::\d{2}(?:,\d{3})?)?)\]?$")
+# 复杂的文本清理函数已移除 - Trafilatura 内置清理更专业
+REFINE_VERSION = "2.0.0"  # 简化版本
 
 def refine_extracted_text_with_report(s: str) -> tuple[str, Dict[str, Any]]:
-    """通用提取后文本清洗，返回 (clean_text, report)。
-    规则包含：脚注剔除/保护、空行与空白策略、列表续行、PDF 断词修复、
-    CJK 间距、字幕指示与时间戳过滤、可选破折号/引号风格、分节符保留等。
-    """
-    report: Dict[str, Any] = {
-        'eol_normalized': False,
-        'leading_trailing_blanks_removed': [0, 0],
-        'max_consec_blanks_before': 0,
-        'max_consec_blanks_after': 0,
-        'tabs_found': 0,
-        'nnbsp_found': 0,
-        'zw_removed': 0,
-        'list_items_detected': 0,
-        'list_wrapped_lines': 0,
-        'poetry_blocks_preserved': False,
-        'hyphenation_joins': 0,
-    }
-
-    # 读取环境配置
-    def _bool(env: str, default: bool = True) -> bool:
-        v = os.getenv(env)
-        if v is None:
-            return default
-        return v.lower() in ('1', 'true', 'yes', 'on')
-
-    NORMALIZE_EOL = _bool('NORMALIZE_EOL', True)
-    TRIM_LEADING = _bool('TRIM_LEADING_BLANKS', True)
-    TRIM_TRAILING = _bool('TRIM_TRAILING_BLANKS', True)
-    PRESERVE_SECTION_BREAKS = _bool('PRESERVE_SECTION_BREAKS', True)
-    KEEP_POETRY_LINEBREAKS = _bool('KEEP_POETRY_LINEBREAKS', False)
-    KEEP_ZWJ = _bool('KEEP_ZWJ', True)
-    KEEP_NNBSP_FOR_UNITS = _bool('KEEP_NNBSP_FOR_UNITS', True)
-
+    """简化的文本清理 - Trafilatura 已经做了大部分工作"""
     try:
-        # 0) 统计初始状态
-        report['tabs_found'] = s.count('\t')
-        report['nnbsp_found'] = s.count('\u00A0') + s.count('\u2007') + s.count('\u202F')
-        # 最大连续空行（before）
-        report['max_consec_blanks_before'] = max((len(m) for m in re.findall(r'\n{2,}', s)), default=0)
-
-        # 1) EOL 归一
-        if NORMALIZE_EOL:
-            if ('\r' in s):
-                s = s.replace('\r\n', '\n').replace('\r', '\n')
-                report['eol_normalized'] = True
-
-        # 2) 去 BOM 与控制字符（保留 \n、\t）
-        if s.startswith('\ufeff'):
-            s = s.lstrip('\ufeff')
-        s = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', '', s)
-
-        # 3) Tabs → 空格，再合并多空白
-        tabw = int(os.getenv('COLLAPSE_TABS', '4') or '4')
-        if report['tabs_found'] > 0 and tabw > 0:
-            s = s.expandtabs(tabw)
-
-        # 4) 软连字符/零宽字符（保留 ZWJ/LRM/RLM）
-        before_len = len(s)
-        s = s.replace('\u00AD', '').replace('\u200B', '')
-        if not KEEP_ZWJ:
-            s = s.replace('\u200D', '')
-        report['zw_removed'] = before_len - len(s)
-
-        # 5) 保护 U+202F（数字+单位），其余 NBSP 家族转空格
-        PROTECT = '<<<NNBSP_UNIT>>>'
-        if KEEP_NNBSP_FOR_UNITS:
-            s = re.sub(r'(\d)\u202F(?=\S)', r'\1' + PROTECT, s)
-        s = s.replace('\u00A0', ' ').replace('\u2007', ' ').replace('\u202F', ' ')
-        s = s.replace(PROTECT, '\u202F')
-
-        # 6) 保护 O.S./sic 变体
-        def _protect_os_sic(match: re.Match) -> str:
-            inner = match.group(1)
-            if inner.lower().startswith('o.s.'):
-                return OS_PLACEHOLDER + inner
-            return SIC_PLACEHOLDER + inner
-        s = PROTECT_OS_SIC.sub(_protect_os_sic, s)
-
-        # 7) 剔除零信息脚注族
-        s = FOOTNOTE_RE_ASCII.sub('', s)
-        s = FOOTNOTE_RE_FULLWIDTH.sub('', s)
-        s = FOOTNOTE_RE_CORNER.sub('', s)
-        s = FOOTNOTE_RE_PAREN_NOTE.sub('', s)
-
-        # 8) O.S./sic 还原为括号，缺右括补全
-        s = s.replace(OS_PLACEHOLDER, '(')
-        s = s.replace(SIC_PLACEHOLDER, '(')
-        s = re.sub(r'\(O\.S\.[^\)\n]+', lambda m: m.group(0) + ')', s)
-        s = re.sub(r'\(sic[^\)\n]+', lambda m: m.group(0) + ')', s, flags=re.I)
-
-        # 9) 去掉舞台指示/时间戳独立行，标准化说话人
-        normalized_lines: list[str] = []
-        for ln in (s.split('\n')):
-            raw = ln.strip()
-            if raw == '':
-                normalized_lines.append('')
-                continue
-            if CAPTION_HINT.search(raw) and len(raw) < 200:
-                continue
-            if STAGE_HINT.match(raw):
-                continue
-            if TIMESTAMP_HINT.match(raw):
-                continue
-            if re.match(r'^[A-Z][A-Z0-9 _-]{1,20}:', raw):
-                raw = re.sub(r'^([A-Z][A-Z0-9 _-]{1,20}):', r'**\1:**', raw)
-            normalized_lines.append(raw)
-        s = '\n'.join(normalized_lines)
-
-        # 10) PDF 断词修复：word-\nwrap → wordwrap
-        def _join_hyphen(m: re.Match) -> str:
-            report['hyphenation_joins'] += 1
-            return m.group(1) + m.group(2)
-        s = re.sub(r'([A-Za-z]{2,})-\n([A-Za-z]{2,})', _join_hyphen, s)
-
-        # 11) 行尾空白去除
-        s = re.sub(r'[ \t]+\n', '\n', s)
-
-        # 12) 列表续行与项目计数
-        lines = s.split('\n')
-        out_lines: list[str] = []
-        list_item_re = re.compile(r'^\s*(?:[-*+]|\d{1,3}\.)\s+')
-        indent_re = re.compile(r'^(\s{2,}).+')
-        in_list = False
-        current_indent = ''
-        for ln in lines:
-            if list_item_re.match(ln):
-                report['list_items_detected'] += 1
-                in_list = True
-                m = indent_re.match(ln)
-                current_indent = m.group(1) if m else ''
-                out_lines.append(ln.rstrip())
-                continue
-            if in_list and (ln.startswith(current_indent) or ln.startswith('  ')) and not list_item_re.match(ln) and ln.strip() != '':
-                # 续行：拼接到上一行
-                out_lines[-1] = (out_lines[-1].rstrip() + ' ' + ln.strip())
-                report['list_wrapped_lines'] += 1
-                continue
-            in_list = False
-            current_indent = ''
-            out_lines.append(ln)
-        s = '\n'.join(out_lines)
-
-        # 13) 诗歌/歌词保护（可选）
-        if not KEEP_POETRY_LINEBREAKS:
-            # 合并段内换行 → 空格
-            paragraphs = re.split(r'\n{2,}', s)
-            merged: list[str] = []
-            for p in paragraphs:
-                # 检测短行块
-                lines_p = [x for x in p.split('\n') if x.strip() != '']
-                short_block = len(lines_p) >= 3 and all(len(x) < 40 and not re.search(r'[。！？.!?]$', x) for x in lines_p)
-                if short_block:
-                    report['poetry_blocks_preserved'] = True
-                    merged.append('\n'.join(lines_p))
-                    continue
-                one = re.sub(r'[ \t]*\n[ \t]*', ' ', p)
-                one = re.sub(r'\s+', ' ', one).strip()
-                merged.append(one)
-            s = '\n\n'.join([m for m in merged if m])
-
-        # 14) CJK 间距策略
-        # 汉字之间不留空格
-        s = re.sub(r'([\u4E00-\u9FFF])\s+([\u4E00-\u9FFF])', r'\1\2', s)
-        # 汉字与英文/数字之间：auto/none/always
-        side = (os.getenv('CJK_SIDE_SPACE') or 'auto').lower()
-        if side == 'none':
-            s = re.sub(r'([\u4E00-\u9FFF])\s+([A-Za-z0-9])', r'\1\2', s)
-            s = re.sub(r'([A-Za-z0-9])\s+([\u4E00-\u9FFF])', r'\1\2', s)
-        elif side == 'always':
-            s = re.sub(r'([\u4E00-\u9FFF])([A-Za-z0-9])', r'\1 \2', s)
-            s = re.sub(r'([A-Za-z0-9])([\u4E00-\u9FFF])', r'\1 \2', s)
-        else:  # auto：仅在两侧都是 ASCII 单词边界时保留 1 空格
-            s = re.sub(r'([\u4E00-\u9FFF])\s*([A-Za-z0-9])', r'\1 \2', s)
-            s = re.sub(r'([A-Za-z0-9])\s*([\u4E00-\u9FFF])', r'\1 \2', s)
-
-        # 15) 句点后双空格 → 单空格
-        s = re.sub(r'([.!?。！？])\s{2,}', r'\1 ', s)
-
-        # 16) 分节符保留与统一
-        if PRESERVE_SECTION_BREAKS:
-            s = re.sub(r'^\s*(?:[-*_]\s*){3,}\s*$', '---', s, flags=re.M)
-
-        # 17) 连续空行压缩
-        max_blanks = int(os.getenv('MAX_CONSEC_BLANKS', '1') or '1')
-        if max_blanks < 1:
-            max_blanks = 1
-        # 统计 before→after
-        report['max_consec_blanks_before'] = max((len(m) for m in re.findall(r'\n{2,}', s)), default=0)
-        s = re.sub(r'\n{'+str(max_blanks+1)+',}', '\n'* (max_blanks+1 - 1 if max_blanks>0 else 1), s)
-        report['max_consec_blanks_after'] = max((len(m) for m in re.findall(r'\n{2,}', s)), default=0)
-
-        # 18) 标点风格（破折号/引号）
-        dash_style = (os.getenv('TEXT_DASH_STYLE') or '').lower()
-        if dash_style == 'hyphen':
-            s = s.replace('—', '-').replace('–', '-')
-        quote_style = (os.getenv('TEXT_QUOTES_STYLE') or '').lower()
-        if quote_style == 'ascii':
-            s = (s
-                 .replace('“', '"').replace('”', '"')
-                 .replace('‘', "'").replace('’', "'"))
-
-        # 19) 还原受保护的窄不换行空格
-        s = s.replace(NARROW_NBSP_GUARD, '\u202F')
-
-        # 20) 首尾空行裁剪
-        if TRIM_LEADING:
-            leading = len(re.match(r'^(\n+)', s).group(1)) if re.match(r'^(\n+)', s) else 0
-            if leading:
-                report['leading_trailing_blanks_removed'][0] = leading
-                s = s.lstrip('\n')
-        if TRIM_TRAILING:
-            trailing = len(re.search(r'(\n+)$', s).group(1)) if re.search(r'(\n+)$', s) else 0
-            if trailing:
-                report['leading_trailing_blanks_removed'][1] = trailing
-                s = s.rstrip('\n')
-
-        return s.strip(), report
+        # 基础清理：去除首尾空白，合并多余空行
+        cleaned = s.strip()
+        cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)  # 最多保留双换行
+        
+        report = {
+            'extraction_method': 'simplified',
+            'original_length': len(s),
+            'cleaned_length': len(cleaned),
+            'compression_ratio': 1 - (len(cleaned) / max(1, len(s)))
+        }
+        
+        return cleaned, report
     except Exception:
-        return s, report
+        return s, {'extraction_method': 'failed'}
 
 
 def refine_extracted_text(s: str) -> str:
@@ -807,7 +501,7 @@ async def fetch_page_content(url: str) -> Dict[str, Any]:
             text: Optional[str] = None
             blocked_reason: Optional[str] = None
             refine_report: Optional[Dict[str, Any]] = None
-            use_curator_primary = (os.getenv('CURATOR_PRIMARY', 'true').lower() in ('1', 'true', 'yes', 'on'))
+            # Curator 已完全移除，Trafilatura 足够强大
 
             # 防乱码/二进制：若声明 text/* 但 body 看起来像压缩或二进制，尝试解压后再解码
             try:
@@ -852,117 +546,85 @@ async def fetch_page_content(url: str) -> Dict[str, Any]:
                                     extracted_text = page_obj.get('extract') or ''
                                     break
                         if extracted_text:
-                            max_len = int(os.getenv('PAGE_TEXT_MAX_LEN', '500000') or '500000')
                             refined, rep = refine_extracted_text_with_report(extracted_text)
-                            text = _normalize_text(refined, max_len=max_len)
+                            text = refined
                             refine_report = rep
                 except Exception:
                     pass
 
             if ('text/html' in content_type) or (content_type.startswith('application/xhtml')) or (content_type == ''):
                 html = (resp_text_override if resp_text_override is not None else resp.text) or None
-                if use_curator_primary:
+                
+                # 极简流程：Trafilatura 为主，BeautifulSoup 保险
+                text = None
+                refine_report = {'extraction_method': 'failed'}
+                
+                # 方案 1: Trafilatura 专业提取
+                if TRAFILATURA_AVAILABLE and is_trafilatura_enabled():
                     try:
-                        curated = apply_curator(html=html, text=None)
-                    except Exception:
-                        curated = None
-                    if curated and (curated.get('curated_text') or '').strip() != '':
-                        text = curated.get('curated_text')
-                        refine_report = (refine_report or {})
-                        refine_report['curation_info'] = curated.get('curation_info')
-                    else:
-                        # Curator 未产出内容时，作为最后的兜底，做极简提取
-                        try:
-                            soup = BeautifulSoup(html or '', 'html.parser')
-                            for tag in soup(['script', 'style', 'noscript']):
-                                tag.decompose()
-                            extracted_text = soup.get_text('\n', strip=True)
-                            max_len = int(os.getenv('PAGE_TEXT_MAX_LEN', '500000') or '500000')
-                            text = _normalize_text(extracted_text, max_len=max_len)
-                        except Exception:
-                            text = None
-                else:
-                    # 旧路径（保留回退）：Readability → 净化 → 规范化
-                    article_html: Optional[str] = None
+                        _dbg("使用 Trafilatura 专业提取")
+                        trafilatura_config = get_trafilatura_config()
+                        trafilatura_result = extract_content_with_trafilatura(
+                            html=html,
+                            url=url,
+                            **trafilatura_config
+                        )
+                        
+                        if trafilatura_result and trafilatura_result.get('text'):
+                            text = trafilatura_result['text']
+                            refine_report = {
+                                'extraction_method': 'trafilatura',
+                                'trafilatura_info': {
+                                    'title': trafilatura_result.get('title'),
+                                    'author': trafilatura_result.get('author'),
+                                    'date': trafilatura_result.get('date'),
+                                    'language': trafilatura_result.get('language'),
+                                    'sitename': trafilatura_result.get('sitename'),
+                                    'raw_text_length': trafilatura_result.get('raw_text_length')
+                                }
+                            }
+                            _dbg(f"Trafilatura 提取成功: {len(text)} 字符")
+                    except Exception as e:
+                        _dbg(f"Trafilatura 提取异常: {e}")
+                
+                # 方案 2: BeautifulSoup 保险回退
+                if not text:
                     try:
-                        doc = Document(html or '')
-                        article_html = doc.summary()
-                    except Exception:
-                        article_html = None
-
-                    if article_html:
-                        try:
-                            cleaned_html = _sanitize_html(article_html)
-                            article_soup = BeautifulSoup(cleaned_html, 'html.parser')
-                            extracted_text = article_soup.get_text('\n', strip=True)
-                            if extracted_text:
-                                max_len = int(os.getenv('PAGE_TEXT_MAX_LEN', '500000') or '500000')
-                                refined, rep = refine_extracted_text_with_report(extracted_text)
-                                text = _normalize_text(refined, max_len=max_len)
-                                refine_report = rep
-                            html = cleaned_html
-                        except Exception:
-                            text = None
-                    else:
-                        try:
-                            soup = BeautifulSoup(html or '', 'html.parser')
-                            for tag in soup(['script', 'style', 'noscript']):
-                                tag.decompose()
-                            main = soup.find('article') or soup.find(attrs={'role': 'main'}) or soup.find(id='main')
-                            target = main if main else soup.body or soup
-                            cleaned_html = _sanitize_html(str(target))
-                            target_soup = BeautifulSoup(cleaned_html, 'html.parser')
-                            extracted_text = target_soup.get_text(separator='\n', strip=True)
-                            if extracted_text:
-                                max_len = int(os.getenv('PAGE_TEXT_MAX_LEN', '500000') or '500000')
-                                refined, rep = refine_extracted_text_with_report(extracted_text)
-                                text = _normalize_text(refined, max_len=max_len)
-                                refine_report = rep
-                            html = cleaned_html
-                            page_title = (soup.title.string or '').strip() if soup.title and soup.title.string else ''
-                            if 'Just a moment' in page_title or 'Cloudflare' in page_title or 'cf-challenge' in (html or '') or 'Attention Required!' in page_title:
-                                blocked_reason = 'cloudflare_challenge'
-                        except Exception:
-                            text = None
+                        _dbg("使用 BeautifulSoup 保险回退")
+                        soup = BeautifulSoup(html or '', 'html.parser')
+                        
+                        # 检测反爬虫
+                        page_title = (soup.title.string or '').strip() if soup.title and soup.title.string else ''
+                        if any(keyword in page_title for keyword in ['Just a moment', 'Cloudflare', 'Attention Required!']):
+                            blocked_reason = 'cloudflare_challenge'
+                        
+                        # 简单提取
+                        for tag in soup(['script', 'style', 'noscript']):
+                            tag.decompose()
+                        
+                        extracted_text = soup.get_text('\n', strip=True)
+                        if extracted_text and len(extracted_text) > 100:
+                            text = extracted_text
+                            refine_report = {'extraction_method': 'beautifulsoup_fallback'}
+                            _dbg(f"BeautifulSoup 回退成功: {len(text)} 字符")
+                    except Exception as e:
+                        _dbg(f"BeautifulSoup 回退异常: {e}")
             elif content_type.startswith('text/'):
-                # 纯文本资源
-                raw_text = ((resp_text_override if resp_text_override is not None else resp.text) or '')[:50000]
-                if use_curator_primary:
-                    try:
-                        curated = apply_curator(html=None, text=raw_text)
-                    except Exception:
-                        curated = None
-                    if curated and (curated.get('curated_text') or '').strip() != '':
-                        text = curated.get('curated_text')
-                        refine_report = (refine_report or {})
-                        refine_report['curation_info'] = curated.get('curation_info')
-                    else:
-                        max_len = int(os.getenv('PAGE_TEXT_MAX_LEN', '500000') or '500000')
-                        refined, rep = refine_extracted_text_with_report(raw_text)
-                        text = _normalize_text(refined, max_len=max_len)
-                        refine_report = rep
-                else:
-                    refined, rep = refine_extracted_text_with_report(raw_text)
-                    text = _normalize_text(refined, max_len=int(os.getenv('PAGE_TEXT_MAX_LEN', '500000') or '500000'))
-                    refine_report = rep
+                # 纯文本资源 - 极简处理
+                text = ((resp_text_override if resp_text_override is not None else resp.text) or '')[:50000]
+                refine_report = {'extraction_method': 'plain_text'}
                 html = None
             else:
-                # PDF: application/pdf 或 URL 以 .pdf 结尾
+                # PDF 处理 - 简化
                 if ('application/pdf' in content_type) or (str(resp.url).lower().endswith('.pdf')):
                     try:
                         if pdf_extract_text:
-                            # 直接用响应内容写入内存文件并提取
-                            raw = resp.content or b''
-                            # pdfminer 接口对 bytes 直接支持有限，这里写临时文件更稳
                             import tempfile
                             with tempfile.NamedTemporaryFile(suffix='.pdf') as tf:
-                                tf.write(raw)
+                                tf.write(resp.content or b'')
                                 tf.flush()
-                                pdf_text = pdf_extract_text(tf.name) or ''
-                            max_len = int(os.getenv('PAGE_TEXT_MAX_LEN', '500000') or '500000')
-                            refined, rep = refine_extracted_text_with_report(pdf_text)
-                            text = _normalize_text(refined, max_len=max_len)
-                            refine_report = rep
+                                text = pdf_extract_text(tf.name) or ''
+                            refine_report = {'extraction_method': 'pdf'}
                             html = None
                         else:
                             text = None
@@ -983,11 +645,8 @@ async def fetch_page_content(url: str) -> Dict[str, Any]:
                     if vid and YouTubeTranscriptApi:
                         transcript_text = await _fetch_youtube_transcript_async(vid)
                         if transcript_text:
-                            max_len = int(os.getenv('PAGE_TEXT_MAX_LEN', '500000') or '500000')
-                            refined_tr, _ = refine_extracted_text_with_report(transcript_text)
-                            norm_tr = _normalize_text(refined_tr, max_len=max_len)
-                            text = (text + '\n\n' if text else '') + norm_tr
-                            _dbg(f"yt transcript appended len={len(norm_tr)}")
+                            text = (text + '\n\n' if text else '') + transcript_text
+                            _dbg(f"yt transcript appended len={len(transcript_text)}")
                         else:
                             _dbg("yt transcript not available")
                     elif YouTubeTranscriptApi is None:
@@ -995,17 +654,7 @@ async def fetch_page_content(url: str) -> Dict[str, Any]:
             except Exception as yt_exc:
                 _dbg(f"yt transcript error: {yt_exc}")
 
-            # 末尾兜底：若未启用主清洗或前面未产出内容，再尝试一次 Curator
-            if not use_curator_primary:
-                try:
-                    curated = apply_curator(html=html, text=text)
-                except Exception:
-                    curated = None
-                if curated and (curated.get('curated_text') or '').strip() != '':
-                    text = curated.get('curated_text')
-                    if refine_report is None:
-                        refine_report = {}
-                    refine_report['curation_info'] = curated.get('curation_info')
+            # Trafilatura 已经足够强大，无需其他处理
 
             # Sumy 内容预处理：提取关键段落
             sumy_processing_info = None
