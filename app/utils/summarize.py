@@ -6,8 +6,103 @@ import re
 
 logger = logging.getLogger(__name__)
 
-# 注意：Sumy 现在作为内容预处理步骤在 metadata.py 中处理
-# 此处不再需要 Sumy 摘要备选逻辑
+# Token 计算和限制
+def estimate_tokens(text: str) -> int:
+    """估算文本的 token 数量（简单估算：1 token ≈ 4 字符）"""
+    if not text:
+        return 0
+    # 对于中英文混合文本，使用更保守的估算
+    # 英文：1 token ≈ 4 字符
+    # 中文：1 token ≈ 1.5-2 字符
+    chinese_chars = len([c for c in text if '\u4e00' <= c <= '\u9fff'])
+    other_chars = len(text) - chinese_chars
+    
+    # 中文按 1.8 字符/token，英文按 4 字符/token 估算
+    estimated_tokens = int(chinese_chars / 1.8 + other_chars / 4)
+    return estimated_tokens
+
+def truncate_to_token_limit(text: str, max_tokens: int = 6000) -> str:
+    """将文本截断到指定 token 限制内，保留开头和结尾重要内容"""
+    if not text:
+        return text
+    
+    current_tokens = estimate_tokens(text)
+    if current_tokens <= max_tokens:
+        return text
+    
+    # 智能截断策略：保留开头 70% + 结尾 20%，中间 10% 用省略号
+    target_tokens = int(max_tokens * 0.9)  # 留10%缓冲
+    
+    # 计算开头和结尾的字符长度
+    start_ratio = 0.75  # 开头占75%
+    end_ratio = 0.25    # 结尾占25%
+    
+    start_tokens = int(target_tokens * start_ratio)
+    end_tokens = int(target_tokens * end_ratio)
+    
+    # 估算对应的字符长度
+    start_chars = int(start_tokens * 3.5)  # 平均3.5字符/token
+    end_chars = int(end_tokens * 3.5)
+    
+    # 按段落分割
+    paragraphs = text.split('\n\n')
+    if len(paragraphs) < 2:
+        # 如果段落太少，直接截断前面部分
+        safe_length = int(target_tokens * 3.5)
+        truncated_text = text[:safe_length]
+    else:
+        # 保留开头段落
+        start_text = ""
+        start_length = 0
+        start_paras = []
+        
+        for para in paragraphs:
+            para = para.strip()
+            if not para:
+                continue
+            if start_length + len(para) + 2 <= start_chars:
+                start_paras.append(para)
+                start_length += len(para) + 2
+            else:
+                break
+        
+        # 保留结尾段落
+        end_paras = []
+        end_length = 0
+        
+        for para in reversed(paragraphs):
+            para = para.strip()
+            if not para:
+                continue
+            if end_length + len(para) + 2 <= end_chars:
+                end_paras.insert(0, para)  # 插入到开头保持顺序
+                end_length += len(para) + 2
+            else:
+                break
+        
+        # 组合文本
+        start_text = '\n\n'.join(start_paras)
+        end_text = '\n\n'.join(end_paras)
+        
+        # 避免重复内容
+        if len(start_paras) + len(end_paras) >= len(paragraphs):
+            # 如果开头+结尾已经包含了大部分内容，就只用开头
+            truncated_text = start_text
+        else:
+            # 加上省略标记
+            truncated_text = start_text + '\n\n[...内容省略...]\n\n' + end_text
+    
+    # 最终安全检查
+    if estimate_tokens(truncated_text) > max_tokens:
+        # 硬截断到安全长度
+        safe_length = int(max_tokens * 3.2)  # 更保守的估算
+        truncated_text = truncated_text[:safe_length]
+    
+    final_tokens = estimate_tokens(truncated_text)
+    logger.info(f"智能截断: {current_tokens} tokens → {final_tokens} tokens (保留开头+结尾)")
+    return truncated_text
+
+# 注意：Sumy 预处理已移除，直接使用 Trafilatura 提取的内容
 
 
 def _enabled() -> bool:
@@ -26,10 +121,9 @@ async def generate_summary(text: str) -> Optional[str]:
     - SUMMARY_MODEL: 默认 'gpt-4o-mini'（可替换为兼容模型）
     - OPENAI_API_KEY / OPENAI_BASE_URL: 兼容 OpenAI 风格接口
     - SUMMARY_MAX_TOKENS: 输出上限（默认 1200）
-    - SUMMARY_INPUT_CHAR_LIMIT: 输入截断（默认 16000）
+    - SUMMARY_INPUT_TOKEN_LIMIT: 输入 token 限制（默认 8000）
     
-    注意：输入的 text 已经过 Sumy 预处理（关键段落提取），
-    因此可以直接用于 LLM 摘要，无需额外的内容筛选。
+    注意：输入文本会自动截断到 8k tokens 以内，确保不超过模型限制。
     """
     try:
         if not _enabled():
@@ -38,15 +132,22 @@ async def generate_summary(text: str) -> Optional[str]:
         if not text or len(text.strip()) == 0:
             return None
 
-        # 注意：此时的 text 已经过 Sumy 预处理，包含了关键段落内容
-        logger.info(f"开始 LLM 摘要生成，输入文本长度: {len(text)}")
+        # Token 成本控制：避免输入过长导致费用过高
+        input_token_limit = int(os.getenv('SUMMARY_INPUT_TOKEN_LIMIT', '6000') or '6000')  # 降低到6k以控制成本
+        original_tokens = estimate_tokens(text)
+        
+        if original_tokens > input_token_limit:
+            logger.info(f"输入文本过长 ({original_tokens} tokens)，为控制成本截断到 {input_token_limit} tokens")
+            text = truncate_to_token_limit(text, input_token_limit)
+        
+        logger.info(f"开始 LLM 摘要生成，输入文本长度: {len(text)} 字符, 约 {estimate_tokens(text)} tokens")
 
         # LLM 摘要流程
-
         provider = (os.getenv('SUMMARY_PROVIDER') or 'openai').lower()
         model = os.getenv('SUMMARY_MODEL') or 'gpt-4o-mini'
         max_tokens = int(os.getenv('SUMMARY_MAX_TOKENS', '1200') or '1200')
-        input_limit = int(os.getenv('SUMMARY_INPUT_CHAR_LIMIT', '16000') or '16000')
+        
+        # 移除旧的字符限制配置，改用 token 限制
         chunk_limit = int(os.getenv('SUMMARY_CHUNK_CHAR_LIMIT', '4000') or '4000')
         max_chunks = int(os.getenv('SUMMARY_MAX_CHUNKS', '8') or '8')
 
@@ -54,36 +155,31 @@ async def generate_summary(text: str) -> Optional[str]:
         if len(raw) == 0:
             return None
 
-        # 简单分段切块（优先按空行分段）
+        # 由于已经做了 token 限制，大部分情况下不需要分块
+        # 只有当文本仍然很长时才分块处理
         def _split_into_chunks(s: str, limit: int) -> list[str]:
             s = s.strip()
             if len(s) <= limit:
                 return [s]
-            parts = [p for p in s.split('\n\n') if p.strip()]
+            # 按段落分块
+            paragraphs = [p.strip() for p in s.split('\n\n') if p.strip()]
             chunks: list[str] = []
-            buf: list[str] = []
-            cur_len = 0
-            for p in parts:
-                p2 = p.strip()
-                if not p2:
-                    continue
-                if cur_len + len(p2) + (2 if buf else 0) <= limit:
-                    buf.append(p2)
-                    cur_len += len(p2) + (2 if buf else 0)
+            current_chunk = []
+            current_length = 0
+            
+            for para in paragraphs:
+                if current_length + len(para) + 2 <= limit:
+                    current_chunk.append(para)
+                    current_length += len(para) + 2
                 else:
-                    if buf:
-                        chunks.append('\n\n'.join(buf))
-                    if len(p2) <= limit:
-                        buf = [p2]
-                        cur_len = len(p2)
-                    else:
-                        # 段落本身过长，硬切
-                        for i in range(0, len(p2), limit):
-                            chunks.append(p2[i:i+limit])
-                        buf = []
-                        cur_len = 0
-            if buf:
-                chunks.append('\n\n'.join(buf))
+                    if current_chunk:
+                        chunks.append('\n\n'.join(current_chunk))
+                    current_chunk = [para]
+                    current_length = len(para)
+            
+            if current_chunk:
+                chunks.append('\n\n'.join(current_chunk))
+            
             return chunks
 
         prompt_system = (

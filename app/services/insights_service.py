@@ -567,8 +567,7 @@ class InsightsService:
             cleaned_text = raw_text.strip()
             if cleaned_text:
                 cleaned_text = re.sub(r"\s+", " ", cleaned_text)
-                # 注意：不在这里截断文本，让 Sumy 预处理来控制长度
-                # Sumy 会智能选择关键内容，比简单截断更好
+                # Trafilatura 已经做了很好的内容提取和长度控制
             logger.info(f"[后台任务] 清理后文本长度: {len(cleaned_text) if cleaned_text else 0}")
 
             # 3. 生成摘要（基于清理后的文本）
@@ -609,20 +608,19 @@ class InsightsService:
             extracted_at_val = page.get('extracted_at')
             if isinstance(extracted_at_val, (datetime, date)):
                 extracted_at_val = extracted_at_val.isoformat()
-            # 获取 Sumy 预处理信息
-            sumy_processing = page.get('sumy_processing', {})
+            # Sumy 预处理已移除
             
             content_payload = {
                 'insight_id': str(insight_id),
                 'user_id': str(user_id),
                 'url': url,
-                'text': page.get('text'),  # 这里的 text 已经是 Sumy 预处理后的内容
+                'text': page.get('text'),  # Trafilatura 提取的内容
                 'markdown': page.get('markdown'),
                 'content_type': page.get('content_type'),
                 'extracted_at': extracted_at_val,
                 'summary': summary_text,
                 'thought': thought  # 保存用户的想法/备注到insight_contents表
-                # 注意: sumy_processing 信息不保存到数据库，仅用于日志记录
+                # Sumy 预处理已移除
             }
 
             # 记录处理信息
@@ -630,14 +628,7 @@ class InsightsService:
                 logger.info(f"即将写入 insight_contents - summary 长度: {len(summary_text) if summary_text else 0}, "
                           f"text 长度: {len(page.get('text') or '')}")
                 
-                # 记录 Sumy 预处理信息
-                if sumy_processing.get('applied'):
-                    logger.info(f"Sumy 预处理已应用 - 方法: {sumy_processing.get('method')}, "
-                              f"算法: {sumy_processing.get('algorithm')}, "
-                              f"压缩率: {sumy_processing.get('compression_ratio', 0):.2%}, "
-                              f"段落数: {sumy_processing.get('paragraphs_count')}")
-                else:
-                    logger.info(f"Sumy 预处理未应用 - 原因: {sumy_processing.get('reason', 'unknown')}")
+                # Sumy 预处理已移除 - 直接使用 Trafilatura 提取的内容
             except Exception:
                 pass
 

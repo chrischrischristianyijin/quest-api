@@ -17,14 +17,7 @@ import gzip
 import bz2
 # from app.utils.curator_pipeline import apply_curator  # 已移除，Trafilatura 更强大
 
-# Sumy 内容预处理
-try:
-    from app.utils.sumy_summarizer import extract_key_content_with_sumy, _is_enabled as _sumy_preprocessing_enabled
-    SUMY_PREPROCESSING_AVAILABLE = True
-except ImportError:
-    SUMY_PREPROCESSING_AVAILABLE = False
-    extract_key_content_with_sumy = None
-    _sumy_preprocessing_enabled = lambda: False
+# Sumy 预处理已移除 - 直接使用 Trafilatura 提取的内容
 
 # Trafilatura 正文提取
 try:
@@ -656,55 +649,7 @@ async def fetch_page_content(url: str) -> Dict[str, Any]:
 
             # Trafilatura 已经足够强大，无需其他处理
 
-            # Sumy 内容预处理：提取关键段落
-            sumy_processing_info = None
-            if text and SUMY_PREPROCESSING_AVAILABLE and _sumy_preprocessing_enabled():
-                try:
-                    _dbg(f"开始 Sumy 内容预处理，原文本长度: {len(text)}")
-                    
-                    # 获取 Sumy 配置
-                    max_sentences = int(os.getenv('SUMY_MAX_SENTENCES', '8') or '8')
-                    top_k_paragraphs = int(os.getenv('SUMY_TOP_K_PARAGRAPHS', '4') or '4')
-                    context_window = int(os.getenv('SUMY_CONTEXT_WINDOW', '1') or '1')
-                    algorithm = os.getenv('SUMY_ALGORITHM', 'lexrank').lower()
-                    preserve_mode = os.getenv('SUMY_PRESERVE_MODE', 'balanced').lower()
-                    
-                    sumy_result = extract_key_content_with_sumy(
-                        text=text,
-                        max_sentences=max_sentences,
-                        top_k_paragraphs=top_k_paragraphs,
-                        context_window=context_window,
-                        algorithm=algorithm,
-                        preserve_mode=preserve_mode
-                    )
-                    
-                    if sumy_result and sumy_result.get('processed_text'):
-                        processed_text = sumy_result['processed_text'].strip()
-                        if processed_text:
-                            _dbg(f"Sumy 预处理成功: {sumy_result.get('original_length')} → {sumy_result.get('processed_length')} "
-                                f"(压缩率: {sumy_result.get('compression_ratio', 0):.2%}, 模式: {preserve_mode})")
-                            text = processed_text
-                            sumy_processing_info = {
-                                'applied': True,
-                                'method': sumy_result.get('method'),
-                                'algorithm': sumy_result.get('algorithm'),
-                                'preserve_mode': sumy_result.get('preserve_mode'),
-                                'compression_ratio': sumy_result.get('compression_ratio'),
-                                'paragraphs_count': sumy_result.get('paragraphs_count'),
-                                'key_sentences_count': sumy_result.get('key_sentences_count'),
-                                'key_sentences': sumy_result.get('key_sentences', [])  # 保存关键句子
-                            }
-                        else:
-                            _dbg("Sumy 预处理结果为空，保持原文本")
-                    else:
-                        _dbg("Sumy 预处理未产出结果，保持原文本")
-                        
-                except Exception as sumy_err:
-                    _dbg(f"Sumy 预处理失败: {sumy_err}")
-                    # 保持原文本不变
-                    
-            if sumy_processing_info is None:
-                sumy_processing_info = {'applied': False, 'reason': 'disabled_or_unavailable'}
+            # Sumy 预处理已移除 - 直接使用 Trafilatura 提取的内容
 
             # 全局策略：不再返回 HTML 内容
             html = None
@@ -719,7 +664,6 @@ async def fetch_page_content(url: str) -> Dict[str, Any]:
                 'blocked_reason': blocked_reason,
                 'refine_version': REFINE_VERSION,
                 'refine_report': refine_report,
-                'sumy_processing': sumy_processing_info,
             }
     except Exception:
         return {

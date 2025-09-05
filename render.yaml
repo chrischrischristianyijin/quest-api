@@ -44,27 +44,13 @@ services:
         value: 8
       - key: SUMMARY_TEMPERATURE
         value: 0.3
+      - key: SUMMARY_INPUT_TOKEN_LIMIT
+        value: 6000
       # OPENAI_API_KEY 和 OPENAI_BASE_URL 需要在 Render Dashboard 中手动配置
       # Curator 配置已移除 - Trafilatura 更强大
-      # Sumy 预处理配置
-      - key: SUMY_PREPROCESSING_ENABLED
-        value: true
-      - key: SUMY_ALGORITHM
-        value: lexrank
-      - key: SUMY_TOP_K_PARAGRAPHS
-        value: 4
-      - key: SUMY_MAX_SENTENCES
-        value: 10
-      - key: SUMY_PRESERVE_MODE
-        value: balanced
-      - key: SUMY_PRESERVE_RATIO
-        value: 0.5
-      - key: SUMY_FALLBACK_MAX_LENGTH
-        value: 100000
+      # Sumy 配置已移除 - 直接使用 Trafilatura
       - key: PAGE_TEXT_MAX_LEN
         value: 500000
-      - key: NLTK_DATA
-        value: /opt/render/nltk_data
       # Trafilatura 正文提取配置
       - key: TRAFILATURA_ENABLED
         value: true
