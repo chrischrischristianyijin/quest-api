@@ -121,9 +121,9 @@ async def generate_summary(text: str) -> Optional[str]:
     - SUMMARY_MODEL: 默认 'gpt-4o-mini'（可替换为兼容模型）
     - OPENAI_API_KEY / OPENAI_BASE_URL: 兼容 OpenAI 风格接口
     - SUMMARY_MAX_TOKENS: 输出上限（默认 1200）
-    - SUMMARY_INPUT_TOKEN_LIMIT: 输入 token 限制（默认 8000）
+    - SUMMARY_INPUT_TOKEN_LIMIT: 输入 token 限制（默认 6000）
     
-    注意：输入文本会自动截断到 8k tokens 以内，确保不超过模型限制。
+    注意：输入文本会自动截断到 6k tokens 以内，控制成本并保证质量。
     """
     try:
         if not _enabled():
@@ -147,40 +147,13 @@ async def generate_summary(text: str) -> Optional[str]:
         model = os.getenv('SUMMARY_MODEL') or 'gpt-4o-mini'
         max_tokens = int(os.getenv('SUMMARY_MAX_TOKENS', '1200') or '1200')
         
-        # 移除旧的字符限制配置，改用 token 限制
-        chunk_limit = int(os.getenv('SUMMARY_CHUNK_CHAR_LIMIT', '4000') or '4000')
-        max_chunks = int(os.getenv('SUMMARY_MAX_CHUNKS', '8') or '8')
+        # 旧的分块配置已移除，现在使用 token 限制
 
         raw = text.strip()
         if len(raw) == 0:
             return None
 
-        # 由于已经做了 token 限制，大部分情况下不需要分块
-        # 只有当文本仍然很长时才分块处理
-        def _split_into_chunks(s: str, limit: int) -> list[str]:
-            s = s.strip()
-            if len(s) <= limit:
-                return [s]
-            # 按段落分块
-            paragraphs = [p.strip() for p in s.split('\n\n') if p.strip()]
-            chunks: list[str] = []
-            current_chunk = []
-            current_length = 0
-            
-            for para in paragraphs:
-                if current_length + len(para) + 2 <= limit:
-                    current_chunk.append(para)
-                    current_length += len(para) + 2
-                else:
-                    if current_chunk:
-                        chunks.append('\n\n'.join(current_chunk))
-                    current_chunk = [para]
-                    current_length = len(para)
-            
-            if current_chunk:
-                chunks.append('\n\n'.join(current_chunk))
-            
-            return chunks
+        # 分块逻辑已移除，直接使用截断后的文本
 
         prompt_system = (
             "You are a neutral, concise summarization assistant.\n\n"
@@ -390,7 +363,8 @@ async def generate_summary(text: str) -> Optional[str]:
                 return out[:240]
 
             # 简化：不做分段与汇总，直接对截断文本单次生成；失败→严格重试→抽取式兜底
-            single = raw[:input_limit]
+            # raw 已经在前面被截断到合适长度，直接使用
+            single = raw
             first = await _call_once(single, model)
             if first and first.strip():
                 return first
