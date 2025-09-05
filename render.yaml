@@ -66,6 +66,25 @@ services:
         value: true
       - key: TRAFILATURA_FAVOR_RECALL
         value: false
+      # TF-IDF 预处理优化配置
+      - key: TFIDF_OPTIMIZER_ENABLED
+        value: true
+      - key: TFIDF_MIN_TEXT_LENGTH
+        value: 50
+      - key: TFIDF_MAX_FEATURES
+        value: 1000
+      - key: TFIDF_MIN_DF
+        value: 0.1
+      - key: TFIDF_MAX_DF
+        value: 0.8
+      - key: TFIDF_SIMILARITY_THRESHOLD
+        value: 0.3
+      - key: TFIDF_CONTENT_RATIO
+        value: 0.6
+      - key: TFIDF_REMOVE_LOW_QUALITY
+        value: true
+      - key: TFIDF_ENHANCE_BLOCKS
+        value: true
       # 性能优化配置
       - key: MAX_INSIGHTS_LIMIT
         value: 1000

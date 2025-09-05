@@ -4,10 +4,29 @@ Trafilatura 正文提取器
 """
 
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
 import os
 
 logger = logging.getLogger(__name__)
+
+# TF-IDF 预处理优化
+_TFIDF_AVAILABLE = None
+
+def _check_tfidf_available() -> bool:
+    """检查 TF-IDF 优化器是否可用"""
+    global _TFIDF_AVAILABLE
+    if _TFIDF_AVAILABLE is not None:
+        return _TFIDF_AVAILABLE
+    
+    try:
+        from app.utils.tfidf_optimizer import optimize_html_with_tfidf, is_tfidf_enabled
+        _TFIDF_AVAILABLE = True
+        logger.info("TF-IDF 优化器加载成功")
+        return True
+    except ImportError as e:
+        _TFIDF_AVAILABLE = False
+        logger.warning(f"TF-IDF 优化器不可用: {e}")
+        return False
 
 # 延迟导入，避免启动时的依赖问题
 _TRAFILATURA_AVAILABLE = None
@@ -82,6 +101,15 @@ def extract_content_with_trafilatura(
         
         logger.debug(f"开始 Trafilatura 正文提取: {url}")
         
+        # 步骤 1: TF-IDF 预处理优化（可选）
+        tfidf_report = {}
+        if _check_tfidf_available():
+            from app.utils.tfidf_optimizer import optimize_html_with_tfidf, is_tfidf_enabled
+            if is_tfidf_enabled():
+                logger.debug("启用 TF-IDF 预处理优化")
+                html, tfidf_report = optimize_html_with_tfidf(html, url)
+                logger.debug(f"TF-IDF 优化结果: {tfidf_report.get('optimization', 'unknown')}")
+        
         # 重置缓存（避免内存泄漏）
         reset_caches()
         
@@ -134,7 +162,8 @@ def extract_content_with_trafilatura(
             "fingerprint": metadata.fingerprint if metadata else None,
             "raw_text_length": len(extracted_text),
             "comments_length": 0,  # 暂时不支持评论长度统计
-            "extraction_method": "trafilatura"
+            "extraction_method": "trafilatura_with_tfidf" if tfidf_report.get('optimization') == 'success' else "trafilatura",
+            "tfidf_optimization": tfidf_report  # TF-IDF 预处理报告
         }
         
         # 如果需要评论，单独提取
@@ -188,18 +217,32 @@ Trafilatura 配置选项:
 核心开关:
 - TRAFILATURA_ENABLED=true                    # 启用 Trafilatura 提取
 
-提取选项:
-- TRAFILATURA_INCLUDE_COMMENTS=false          # 包含评论内容
-- TRAFILATURA_INCLUDE_TABLES=true             # 包含表格内容
-- TRAFILATURA_INCLUDE_FORMATTING=false        # 保留格式标记
-- TRAFILATURA_DEDUPLICATE=true                # 去重复内容
+内容控制:
+- TRAFILATURA_INCLUDE_COMMENTS=false          # 不包含评论（避免噪声）
+- TRAFILATURA_INCLUDE_TABLES=true             # 包含表格（学术/报告类有用）
+- TRAFILATURA_INCLUDE_FORMATTING=false        # 不保留格式标记（纯文本）
+- TRAFILATURA_DEDUPLICATE=true                # 去重重复段落（新闻站点常见）
 
-策略选项:
-- TRAFILATURA_FAVOR_PRECISION=true            # 优先精确度（更严格）
-- TRAFILATURA_FAVOR_RECALL=false              # 优先召回率（更宽松）
+质量优化:
+- TRAFILATURA_FAVOR_PRECISION=true            # 优先精确度（严格正文检测）
+- TRAFILATURA_FAVOR_RECALL=false              # 不优先召回率（避免宽松模式）
 
-推荐配置:
-- 新闻文章: PRECISION=true, TABLES=true
-- 博客内容: PRECISION=false, RECALL=true
-- 学术论文: TABLES=true, FORMATTING=true
+严格模式:
+- no_fallback=True                            # 失败就返回空，不降级到宽松模式
+
+当前配置优势:
+✅ 更严格的正文检测，减少噪声和广告
+✅ 自动去重重复段落
+✅ 避免评论和导航内容
+✅ 纯文本输出，便于后续处理
+✅ 严格模式确保内容质量
+
+推荐配置（新闻/学术类）:
+TRAFILATURA_ENABLED=true
+TRAFILATURA_INCLUDE_COMMENTS=false
+TRAFILATURA_INCLUDE_TABLES=true
+TRAFILATURA_INCLUDE_FORMATTING=false
+TRAFILATURA_DEDUPLICATE=true
+TRAFILATURA_FAVOR_PRECISION=true
+TRAFILATURA_FAVOR_RECALL=false
 """
