@@ -568,12 +568,9 @@ async def fetch_page_content(url: str) -> Dict[str, Any]:
                             refine_report = {
                                 'extraction_method': 'trafilatura',
                                 'trafilatura_info': {
-                                    'title': trafilatura_result.get('title'),
-                                    'author': trafilatura_result.get('author'),
-                                    'date': trafilatura_result.get('date'),
-                                    'language': trafilatura_result.get('language'),
-                                    'sitename': trafilatura_result.get('sitename'),
-                                    'raw_text_length': trafilatura_result.get('raw_text_length')
+                                    'raw_text_length': trafilatura_result.get('raw_text_length'),
+                                    'extraction_method': trafilatura_result.get('extraction_method'),
+                                    'tfidf_optimization': trafilatura_result.get('tfidf_optimization')
                                 }
                             }
                             _dbg(f"Trafilatura 提取成功: {len(text)} 字符")

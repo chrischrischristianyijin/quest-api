@@ -74,20 +74,10 @@ def extract_content_with_trafilatura(
         包含提取结果的字典，或 None（如果失败）
         {
             "text": str,                # 提取的正文
-            "title": str,               # 标题
-            "author": str,              # 作者
-            "date": str,                # 发布日期
-            "description": str,         # 描述
-            "sitename": str,            # 站点名称
-            "hostname": str,            # 主机名
-            "language": str,            # 语言
-            "source": str,              # 来源URL
-            "categories": list,         # 分类
-            "tags": list,               # 标签
-            "fingerprint": str,         # 内容指纹
             "raw_text_length": int,     # 原始文本长度
             "comments_length": int,     # 评论长度
-            "extraction_method": str    # 提取方法
+            "extraction_method": str,   # 提取方法
+            "tfidf_optimization": dict  # TF-IDF 优化报告
         }
     """
     try:
@@ -107,7 +97,9 @@ def extract_content_with_trafilatura(
             from app.utils.tfidf_optimizer import optimize_html_with_tfidf, is_tfidf_enabled
             if is_tfidf_enabled():
                 logger.debug("启用 TF-IDF 预处理优化")
-                html, tfidf_report = optimize_html_with_tfidf(html, url)
+                # 从 URL 中提取标题作为查询
+                title = url.split('/')[-1].replace('-', ' ').replace('_', ' ') if url else ""
+                html, tfidf_report = optimize_html_with_tfidf(html, url, title, "")
                 logger.debug(f"TF-IDF 优化结果: {tfidf_report.get('optimization', 'unknown')}")
         
         # 重置缓存（避免内存泄漏）
@@ -143,23 +135,9 @@ def extract_content_with_trafilatura(
             logger.warning("Trafilatura 未提取到有效内容")
             return None
         
-        # 提取元数据
-        metadata = trafilatura.extract_metadata(html)
-        
-        # 构建结果
+        # 构建结果（不提取元数据）
         result = {
             "text": extracted_text.strip(),
-            "title": metadata.title if metadata else None,
-            "author": metadata.author if metadata else None,
-            "date": metadata.date if metadata else None,
-            "description": metadata.description if metadata else None,
-            "sitename": metadata.sitename if metadata else None,
-            "hostname": metadata.hostname if metadata else None,
-            "language": metadata.language if metadata else None,
-            "source": metadata.url if metadata else url,
-            "categories": list(metadata.categories) if metadata and metadata.categories else [],
-            "tags": list(metadata.tags) if metadata and metadata.tags else [],
-            "fingerprint": metadata.fingerprint if metadata else None,
             "raw_text_length": len(extracted_text),
             "comments_length": 0,  # 暂时不支持评论长度统计
             "extraction_method": "trafilatura_with_tfidf" if tfidf_report.get('optimization') == 'success' else "trafilatura",
@@ -185,7 +163,7 @@ def extract_content_with_trafilatura(
             except Exception as e:
                 logger.warning(f"评论提取失败: {e}")
         
-        logger.info(f"Trafilatura 提取成功: 文本长度={len(extracted_text)}, 标题='{result['title'][:50] if result['title'] else 'N/A'}'")
+        logger.info(f"Trafilatura 提取成功: 文本长度={len(extracted_text)}")
         return result
         
     except Exception as e:

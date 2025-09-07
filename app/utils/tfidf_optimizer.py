@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 # 检查 scikit-learn 可用性
 try:
     from sklearn.feature_extraction.text import TfidfVectorizer
-    from sklearn.metrics.pairwise import cosine_similarity
+    from sklearn.metrics.pairwise import cosine_similarity, linear_kernel
     SKLEARN_AVAILABLE = True
     logger.info("scikit-learn 库加载成功")
 except ImportError:
@@ -28,6 +28,17 @@ except ImportError:
     logger.warning("scikit-learn 不可用，TF-IDF 优化将被跳过")
     TfidfVectorizer = None
     cosine_similarity = None
+    linear_kernel = None
+
+# 检查 jieba 中文分词可用性
+try:
+    import jieba
+    JIEBA_AVAILABLE = True
+    logger.info("jieba 中文分词库加载成功")
+except ImportError:
+    JIEBA_AVAILABLE = False
+    logger.warning("jieba 不可用，中文分词将被跳过")
+    jieba = None
 
 
 def is_tfidf_enabled() -> bool:
@@ -41,14 +52,19 @@ def is_tfidf_enabled() -> bool:
 def get_tfidf_config() -> Dict[str, Any]:
     """获取 TF-IDF 优化配置"""
     return {
-        'min_text_length': int(os.getenv('TFIDF_MIN_TEXT_LENGTH', '50') or '50'),
-        'max_features': int(os.getenv('TFIDF_MAX_FEATURES', '1000') or '1000'),
-        'min_df': float(os.getenv('TFIDF_MIN_DF', '0.1') or '0.1'),
+        'min_text_length': int(os.getenv('TFIDF_MIN_TEXT_LENGTH', '80') or '80'),  # 中文建议 80-120
+        'max_features': int(os.getenv('TFIDF_MAX_FEATURES', '10000') or '10000'),  # 增加到 10k
+        'min_df': int(os.getenv('TFIDF_MIN_DF', '2') or '2'),  # 改为绝对计数：2
         'max_df': float(os.getenv('TFIDF_MAX_DF', '0.8') or '0.8'),
-        'similarity_threshold': float(os.getenv('TFIDF_SIMILARITY_THRESHOLD', '0.3') or '0.3'),
-        'content_ratio_threshold': float(os.getenv('TFIDF_CONTENT_RATIO', '0.6') or '0.6'),
+        'score_floor': float(os.getenv('TFIDF_SCORE_FLOOR', '0.06') or '0.06'),  # 重命名：得分下限
+        'content_ratio_threshold': float(os.getenv('TFIDF_CONTENT_RATIO', '0.2') or '0.2'),  # 降低到 20%
+        'min_keep_k': int(os.getenv('TFIDF_MIN_KEEP_K', '80') or '80'),  # 新增：最低保留块数
+        'percentile_threshold': float(os.getenv('TFIDF_PERCENTILE_THRESHOLD', '0.80') or '0.80'),  # 新增：80分位阈值
         'remove_low_quality': os.getenv('TFIDF_REMOVE_LOW_QUALITY', 'true').lower() in ('1', 'true', 'yes'),
         'enhance_content_blocks': os.getenv('TFIDF_ENHANCE_BLOCKS', 'true').lower() in ('1', 'true', 'yes'),
+        'enable_chinese_segmentation': os.getenv('TFIDF_ENABLE_CHINESE_SEG', 'true').lower() in ('1', 'true', 'yes'),
+        'max_link_density': float(os.getenv('TFIDF_MAX_LINK_DENSITY', '0.3') or '0.3'),  # 最大链接密度
+        'min_alphanumeric_ratio': float(os.getenv('TFIDF_MIN_ALPHANUMERIC_RATIO', '0.5') or '0.5'),  # 最小字母数字比例
     }
 
 
@@ -88,9 +104,10 @@ class TfidfTextOptimizer:
                 word_count = len(text.split())
                 char_count = len(text)
                 
-                # 检查是否包含链接
+                # 计算链接密度：链接文字长度 / 块文本长度
                 links = tag.find_all('a')
-                link_ratio = len(links) / max(word_count, 1)
+                link_text_len = sum(len(a.get_text(strip=True)) for a in links)
+                link_density = link_text_len / max(len(text), 1)
                 
                 # 检查标签类型权重
                 tag_weight = self._get_tag_weight(tag.name)
@@ -104,7 +121,7 @@ class TfidfTextOptimizer:
                     'text': text,
                     'word_count': word_count,
                     'char_count': char_count,
-                    'link_ratio': link_ratio,
+                    'link_density': link_density,  # 更新为 link_density
                     'tag_weight': tag_weight,
                     'class_score': class_score,
                     'id_score': id_score,
@@ -196,45 +213,145 @@ class TfidfTextOptimizer:
         
         return score
     
-    def _calculate_tfidf_scores(self, text_blocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """使用 TF-IDF 计算文本块得分"""
+    def _pretokenize(self, text: str) -> str:
+        """混合语言预分词：中文 jieba + 英文正规化"""
+        if not text:
+            return ""
+        
+        text = text.strip()
+        tokens = []
+        
+        # 检查是否包含中文字符
+        if re.search(r'[\u4e00-\u9fff]', text):
+            # 中文分词
+            if JIEBA_AVAILABLE and self.config.get('enable_chinese_segmentation', True):
+                try:
+                    # jieba 分词
+                    words = jieba.cut(text)
+                    tokens.extend([w.strip() for w in words if w.strip()])
+                except Exception as e:
+                    logger.warning(f"jieba 分词失败: {e}")
+                    # jieba 失败，用汉字 bigram 兜底
+                    tokens.extend(self._chinese_bigram_fallback(text))
+            else:
+                # jieba 不可用，用汉字 bigram 兜底
+                tokens.extend(self._chinese_bigram_fallback(text))
+        else:
+            # 英文正规化 + 单词切分
+            tokens.extend(self._english_tokenize(text))
+        
+        # 去停用词
+        tokens = self._remove_stopwords(tokens)
+        
+        # 用空格连接
+        return " ".join(tokens)
+    
+    def _chinese_bigram_fallback(self, text: str) -> List[str]:
+        """中文 bigram 兜底分词"""
+        # 提取汉字
+        chinese_chars = re.findall(r'[\u4e00-\u9fff]', text)
+        tokens = []
+        
+        # 单字
+        tokens.extend(chinese_chars)
+        
+        # bigram
+        for i in range(len(chinese_chars) - 1):
+            tokens.append(chinese_chars[i] + chinese_chars[i + 1])
+        
+        return tokens
+    
+    def _english_tokenize(self, text: str) -> List[str]:
+        """英文正规化 + 单词切分"""
+        # 正规化：转小写，去标点
+        normalized = re.sub(r'[^\w\s]', ' ', text.lower())
+        
+        # 单词切分
+        words = normalized.split()
+        
+        # 过滤单字符词（可选）
+        words = [w for w in words if len(w) > 1]
+        
+        return words
+    
+    def _remove_stopwords(self, tokens: List[str]) -> List[str]:
+        """统一去停用词（中英两套）"""
+        # 中文停用词
+        chinese_stopwords = {
+            '的', '了', '在', '是', '我', '有', '和', '就', '不', '人', '都', '一', '一个', '上', '也', '很', '到', '说', '要', '去', '你', '会', '着', '没有', '看', '好', '自己', '这'
+        }
+        
+        # 英文停用词
+        english_stopwords = {
+            'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should'
+        }
+        
+        # 过滤停用词
+        filtered_tokens = []
+        for token in tokens:
+            token_lower = token.lower()
+            if token_lower not in chinese_stopwords and token_lower not in english_stopwords:
+                filtered_tokens.append(token)
+        
+        return filtered_tokens
+
+    def _calculate_tfidf_scores(self, text_blocks: List[Dict[str, Any]], query_text: str = "") -> List[Dict[str, Any]]:
+        """使用 TF-IDF 余弦相似度计算文本块得分"""
         if not text_blocks:
             return text_blocks
         
-        # 准备文本数据
-        texts = [block['text'] for block in text_blocks]
+        # 准备文本数据并预处理
+        texts = [self._pretokenize(block['text']) for block in text_blocks]
+        
+        # 生成查询文本（标题 + 用户查询）
+        if not query_text:
+            # 如果没有查询，使用第一个文本块的前80字符作为查询
+            query_text = texts[0][:80] if texts else ""
+        query_text = self._pretokenize(query_text)
         
         try:
+            # 动态调整 min_df 和 max_df 以适应文档数量
+            n_docs = len(texts)
+            min_df = min(self.config['min_df'], max(1, n_docs - 1))  # 最多 n_docs-1
+            max_df = max(self.config['max_df'], min(1.0, max(0.1, n_docs / 2)))  # 至少50%的文档
+            
+            # 如果文档太少，使用更宽松的设置
+            if n_docs < 3:
+                min_df = 1
+                max_df = 1.0
+            
             # 创建 TF-IDF 向量化器
             self.vectorizer = TfidfVectorizer(
                 max_features=self.config['max_features'],
-                min_df=self.config['min_df'],
-                max_df=self.config['max_df'],
-                stop_words='english',  # 可以根据需要调整
-                ngram_range=(1, 2),    # 包含 1-gram 和 2-gram
-                lowercase=True,
-                strip_accents='unicode'
+                min_df=min_df,
+                max_df=max_df,
+                stop_words=None,  # 在预分词阶段统一去停用词
+                token_pattern=r'(?u)\b\w+\b',  # 保留单字（中文/英文都不丢）
+                ngram_range=(1, 1),    # 只用 1-gram，预分词已处理 ngram
+                lowercase=False,  # 预分词已处理大小写
+                strip_accents=None,  # 预分词已处理
+                norm='l2'  # 保持 L2 归一化，便于余弦相似度计算
             )
             
             # 计算 TF-IDF 向量
             tfidf_matrix = self.vectorizer.fit_transform(texts)
-            self.content_vectors = tfidf_matrix
+            query_vector = self.vectorizer.transform([query_text])
             
-            # 计算每个文本块的 TF-IDF 得分
+            # 计算余弦相似度
+            similarities = linear_kernel(query_vector, tfidf_matrix).ravel()
+            
+            # 计算每个文本块的得分
             for i, block in enumerate(text_blocks):
-                # 获取该文本块的向量
-                vector = tfidf_matrix[i]
-                
-                # 计算向量的 L2 范数作为内容重要性得分
-                tfidf_score = np.linalg.norm(vector.toarray())
+                # TF-IDF 余弦相似度得分
+                tfidf_score = float(similarities[i])
                 
                 # 综合得分：TF-IDF + 结构化特征
                 total_score = (
-                    tfidf_score * 0.4 +
-                    block['tag_weight'] * 0.2 +
-                    block['class_score'] * 0.2 +
-                    block['id_score'] * 0.1 +
-                    (1.0 - block['link_ratio']) * 0.1  # 链接少的内容得分更高
+                    tfidf_score * 0.6 +  # TF-IDF 相似度权重最高
+                    block['tag_weight'] * 0.15 +
+                    block['class_score'] * 0.15 +
+                    block['id_score'] * 0.05 +
+                    (1.0 - block.get('link_density', block.get('link_ratio', 0))) * 0.05
                 )
                 
                 block['tfidf_score'] = tfidf_score
@@ -243,7 +360,8 @@ class TfidfTextOptimizer:
             # 按得分排序
             text_blocks.sort(key=lambda x: x['total_score'], reverse=True)
             
-            logger.debug(f"TF-IDF 分析完成，处理了 {len(text_blocks)} 个文本块")
+            logger.debug(f"TF-IDF 余弦相似度分析完成，处理了 {len(text_blocks)} 个文本块")
+            logger.debug(f"查询文本: {query_text[:100]}...")
             
         except Exception as e:
             logger.warning(f"TF-IDF 计算失败: {e}")
@@ -254,37 +372,90 @@ class TfidfTextOptimizer:
                     block['tag_weight'] * 0.4 +
                     block['class_score'] * 0.3 +
                     block['id_score'] * 0.2 +
-                    (1.0 - block['link_ratio']) * 0.1
+                    (1.0 - block.get('link_density', block.get('link_ratio', 0))) * 0.1
                 )
             text_blocks.sort(key=lambda x: x['total_score'], reverse=True)
         
         return text_blocks
     
+    def _apply_quality_rules(self, text_blocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """应用质量规则过滤"""
+        if not text_blocks:
+            return text_blocks
+        
+        filtered_blocks = []
+        discard_reasons = {'too_short': 0, 'link_density': 0, 'blacklist': 0, 'alphanumeric': 0}
+        
+        # 黑名单短语
+        blacklist_phrases = [
+            'cookie', 'subscribe', '免责', '相关阅读', '扫码', '©', '责任编辑',
+            '广告', '推广', '赞助', '点击', '更多', '阅读全文', '展开全文'
+        ]
+        
+        for block in text_blocks:
+            text = block['text']
+            
+            # 规则1: 最小长度
+            if len(text) < self.config['min_text_length']:
+                discard_reasons['too_short'] += 1
+                continue
+            
+            # 规则2: 链接密度过高
+            if block.get('link_density', 0) > self.config.get('max_link_density', 0.3):
+                discard_reasons['link_density'] += 1
+                continue
+            
+            # 规则3: 非字母数字比例过高
+            alphanumeric_count = sum(1 for c in text if c.isalnum())
+            alphanumeric_ratio = alphanumeric_count / max(len(text), 1)
+            if alphanumeric_ratio < self.config.get('min_alphanumeric_ratio', 0.5):
+                discard_reasons['alphanumeric'] += 1
+                continue
+            
+            # 规则4: 黑名单短语且长度较短
+            text_lower = text.lower()
+            if any(phrase in text_lower for phrase in blacklist_phrases) and len(text) < 120:
+                discard_reasons['blacklist'] += 1
+                continue
+            
+            filtered_blocks.append(block)
+        
+        logger.debug(f"质量规则过滤：{len(text_blocks)} -> {len(filtered_blocks)} 个文本块")
+        logger.debug(f"丢弃原因：{discard_reasons}")
+        
+        return filtered_blocks
+    
     def _filter_low_quality_blocks(self, text_blocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """过滤低质量文本块"""
+        """过滤低质量文本块 - 自适应阈值 + Top-K 兜底"""
         if not self.config['remove_low_quality']:
             return text_blocks
         
         if not text_blocks:
             return text_blocks
         
-        # 计算得分阈值
+        n = len(text_blocks)
         scores = [block['total_score'] for block in text_blocks]
-        if not scores:
-            return text_blocks
         
-        mean_score = np.mean(scores)
-        threshold = mean_score * self.config['content_ratio_threshold']
+        # 计算阈值
+        p80 = float(np.percentile(scores, self.config['percentile_threshold'] * 100))
+        floor = float(self.config.get('score_floor', self.config.get('similarity_threshold', 0.06)))
         
-        # 过滤低质量块
-        filtered_blocks = [
-            block for block in text_blocks 
-            if block['total_score'] >= threshold
-        ]
+        # Top-K 兜底
+        K = max(int(np.ceil(self.config['content_ratio_threshold'] * n)), self.config['min_keep_k'])
         
-        logger.debug(f"过滤低质量内容：{len(text_blocks)} -> {len(filtered_blocks)} 个文本块")
+        # 两种保留策略
+        by_rank = set(range(min(K, n)))  # text_blocks 已按分数降序
+        by_thresh = {i for i, s in enumerate(scores) if s >= max(p80, floor)}
         
-        return filtered_blocks if filtered_blocks else text_blocks[:5]  # 至少保留前5个
+        # 合并保留的索引
+        kept_idx = sorted(by_rank | by_thresh)
+        filtered_blocks = [text_blocks[i] for i in kept_idx]
+        
+        logger.debug(f"自适应过滤：{n} -> {len(filtered_blocks)} 个文本块")
+        logger.debug(f"阈值: P80={p80:.4f}, floor={floor:.4f}, K={K}")
+        logger.debug(f"保留策略: Top-K={len(by_rank)}, 阈值={len(by_thresh)}, 合并={len(kept_idx)}")
+        
+        return filtered_blocks
     
     def _enhance_content_structure(self, soup: BeautifulSoup, high_quality_blocks: List[Dict[str, Any]]) -> BeautifulSoup:
         """增强内容结构，优化 HTML 以提高 Trafilatura 提取质量"""
@@ -325,13 +496,15 @@ class TfidfTextOptimizer:
             logger.warning(f"HTML 结构优化失败: {e}")
             return soup
     
-    def optimize_html(self, html: str, url: Optional[str] = None) -> Tuple[str, Dict[str, Any]]:
+    def optimize_html(self, html: str, url: Optional[str] = None, title: str = "", user_query: str = "") -> Tuple[str, Dict[str, Any]]:
         """
         使用 TF-IDF 优化 HTML 内容
         
         Args:
             html: 原始 HTML 内容
             url: 页面 URL（可选）
+            title: 页面标题（用于查询）
+            user_query: 用户查询（用于查询）
         
         Returns:
             优化后的 HTML 和分析报告
@@ -352,8 +525,14 @@ class TfidfTextOptimizer:
                 logger.warning("未找到有效文本块")
                 return html, {'optimization': 'no_content_blocks'}
             
+            # 生成查询文本
+            query_text = (title + " " + user_query).strip()
+            
             # 计算 TF-IDF 得分
-            text_blocks = self._calculate_tfidf_scores(text_blocks)
+            text_blocks = self._calculate_tfidf_scores(text_blocks, query_text)
+            
+            # 应用质量规则过滤
+            text_blocks = self._apply_quality_rules(text_blocks)
             
             # 过滤低质量内容
             high_quality_blocks = self._filter_low_quality_blocks(text_blocks)
@@ -387,19 +566,21 @@ class TfidfTextOptimizer:
             return html, {'optimization': 'failed', 'error': str(e)}
 
 
-def optimize_html_with_tfidf(html: str, url: Optional[str] = None) -> Tuple[str, Dict[str, Any]]:
+def optimize_html_with_tfidf(html: str, url: Optional[str] = None, title: str = "", user_query: str = "") -> Tuple[str, Dict[str, Any]]:
     """
     便捷函数：使用 TF-IDF 优化 HTML
     
     Args:
         html: 原始 HTML 内容
         url: 页面 URL（可选）
+        title: 页面标题（用于查询）
+        user_query: 用户查询（用于查询）
     
     Returns:
         优化后的 HTML 和分析报告
     """
     optimizer = TfidfTextOptimizer()
-    return optimizer.optimize_html(html, url)
+    return optimizer.optimize_html(html, url, title, user_query)
 
 
 # 配置说明
