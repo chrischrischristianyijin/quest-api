@@ -2,6 +2,8 @@ from typing import List, Optional, Dict, Any
 from uuid import UUID
 from app.core.database import get_supabase, get_supabase_service
 from app.models.insight import InsightCreate, InsightUpdate, InsightResponse, InsightListResponse
+from app.models.insight_chunk import InsightChunkCreate, ChunkingResult
+from app.services.embedding_service import generate_chunk_embeddings, is_embedding_enabled
 from app.services.insight_tag_service import InsightTagService
 from app.utils.metadata import fetch_page_content
 import logging
@@ -667,7 +669,10 @@ class InsightsService:
             else:
                 logger.info(f"[后台任务] insight_contents 保存成功: {url}")
                 
-                # 6.1 保存后回读校验，如 summary 为空且我们本地有 summary_text，则进行一次回填更新
+                # 6.1 保存文本分块数据
+                await _save_insight_chunks(insight_id, cleaned_text, page.get('refine_report', {}))
+                
+                # 6.2 保存后回读校验，如 summary 为空且我们本地有 summary_text，则进行一次回填更新
                 try:
                     check_res = (
                         supabase_service
@@ -845,5 +850,104 @@ def _generate_etag(insights: list) -> str:
     except Exception:
         # 如果生成失败，返回基于时间的简单哈希
         return hashlib.md5(str(datetime.utcnow()).encode()).hexdigest()
+
+
+async def _save_insight_chunks(insight_id: UUID, text: str, refine_report: Dict[str, Any]) -> None:
+    """保存 insight 的文本分块数据"""
+    try:
+        if not text or not text.strip():
+            logger.warning(f"[分块保存] 文本为空，跳过分块保存: insight_id={insight_id}")
+            return
+        
+        # 检查是否启用分块
+        from app.utils.metadata import is_chunker_enabled, get_chunker_config
+        if not is_chunker_enabled():
+            logger.info(f"[分块保存] 分块功能未启用，跳过分块保存: insight_id={insight_id}")
+            return
+        
+        # 获取分块配置
+        config = get_chunker_config()
+        
+        # 执行文本分块
+        from app.utils.text_chunker import chunk_text_for_llm
+        chunk_result = chunk_text_for_llm(
+            text=text,
+            max_tokens=config['max_tokens'],
+            chunk_size=config['chunk_size'],
+            chunk_overlap=config['chunk_overlap'],
+            method=config['method']
+        )
+        
+        chunks = chunk_result.get('chunks', [])
+        if not chunks:
+            logger.warning(f"[分块保存] 未生成分块，跳过保存: insight_id={insight_id}")
+            return
+        
+        logger.info(f"[分块保存] 开始保存分块数据: insight_id={insight_id}, 分块数={len(chunks)}")
+        
+        # 生成 embedding（如果启用）
+        chunk_embeddings = []
+        if is_embedding_enabled():
+            try:
+                logger.info(f"[分块保存] 开始生成 embedding: insight_id={insight_id}")
+                chunk_embeddings = await generate_chunk_embeddings(chunks)
+                logger.info(f"[分块保存] 成功生成 {len(chunk_embeddings)} 个 embedding")
+            except Exception as e:
+                logger.error(f"[分块保存] 生成 embedding 失败: {e}")
+                chunk_embeddings = []
+        
+        # 准备分块数据
+        chunk_data = []
+        for i, chunk_text in enumerate(chunks):
+            chunk_item = {
+                'insight_id': str(insight_id),
+                'chunk_index': i,
+                'chunk_text': chunk_text,
+                'chunk_size': len(chunk_text),
+                'estimated_tokens': chunk_result.get('estimated_tokens_per_chunk', 0),
+                'chunk_method': chunk_result.get('method', config['method']),
+                'chunk_overlap': config['chunk_overlap']
+            }
+            
+            # 添加 embedding 数据（如果可用）
+            if i < len(chunk_embeddings) and chunk_embeddings[i]:
+                embedding_data = chunk_embeddings[i]
+                chunk_item.update({
+                    'embedding': embedding_data.get('embedding'),
+                    'embedding_model': embedding_data.get('model'),
+                    'embedding_tokens': embedding_data.get('tokens_used', 0),
+                    'embedding_generated_at': embedding_data.get('generated_at')
+                })
+            
+            chunk_data.append(chunk_item)
+        
+        # 先删除现有的分块数据（避免重复）
+        supabase_service = get_supabase_service()
+        delete_res = (
+            supabase_service
+            .table('insight_chunks')
+            .delete()
+            .eq('insight_id', str(insight_id))
+            .execute()
+        )
+        
+        if hasattr(delete_res, 'error') and delete_res.error:
+            logger.warning(f"[分块保存] 删除旧分块数据失败: {delete_res.error}")
+        
+        # 批量插入新分块数据
+        insert_res = (
+            supabase_service
+            .table('insight_chunks')
+            .insert(chunk_data)
+            .execute()
+        )
+        
+        if hasattr(insert_res, 'error') and insert_res.error:
+            logger.error(f"[分块保存] 保存分块数据失败: {insert_res.error}")
+        else:
+            logger.info(f"[分块保存] 分块数据保存成功: insight_id={insight_id}, 分块数={len(chunks)}")
+            
+    except Exception as e:
+        logger.error(f"[分块保存] 分块保存异常: insight_id={insight_id}, error={e}")
 
 

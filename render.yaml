@@ -95,6 +95,35 @@ services:
         value: 0.3
       - key: TFIDF_MIN_ALPHANUMERIC_RATIO
         value: 0.5
+      # 文本分块器配置
+      - key: CHUNKER_ENABLED
+        value: true
+      - key: CHUNKER_CHUNK_SIZE
+        value: 1000
+      - key: CHUNKER_CHUNK_OVERLAP
+        value: 200
+      - key: CHUNKER_MAX_TOKENS
+        value: 4000
+      - key: CHUNKER_METHOD
+        value: recursive
+      # 数据库表配置
+      - key: ENABLE_INSIGHT_CHUNKS
+        value: true
+      # OpenAI Embedding 配置
+      - key: EMBEDDING_ENABLED
+        value: true
+      - key: OPENAI_API_KEY
+        value: your_openai_api_key
+      - key: OPENAI_EMBEDDING_MODEL
+        value: text-embedding-3-small
+      - key: OPENAI_EMBEDDING_DIMENSIONS
+        value: 1536
+      - key: OPENAI_EMBEDDING_BATCH_SIZE
+        value: 100
+      - key: OPENAI_EMBEDDING_MAX_RETRIES
+        value: 3
+      - key: OPENAI_EMBEDDING_TIMEOUT
+        value: 30
       # 性能优化配置
       - key: MAX_INSIGHTS_LIMIT
         value: 1000

@@ -574,6 +574,34 @@ async def fetch_page_content(url: str) -> Dict[str, Any]:
                                 }
                             }
                             _dbg(f"Trafilatura 提取成功: {len(text)} 字符")
+                            
+                            # 步骤 3: 文本分块（可选）
+                            chunk_report = {}
+                            if is_chunker_enabled():
+                                try:
+                                    from app.utils.text_chunker import chunk_text_for_llm
+                                    _dbg("启用文本分块处理")
+                                    chunk_result = chunk_text_for_llm(
+                                        text=text,
+                                        max_tokens=4000,
+                                        chunk_size=1000,
+                                        chunk_overlap=200,
+                                        method="recursive"
+                                    )
+                                    chunk_report = {
+                                        'total_chunks': chunk_result.get('total_chunks', 0),
+                                        'avg_chunk_size': chunk_result.get('avg_chunk_size', 0),
+                                        'compression_ratio': chunk_result.get('compression_ratio', 1.0),
+                                        'method': chunk_result.get('method', 'recursive'),
+                                        'llm_optimized': chunk_result.get('llm_optimized', False)
+                                    }
+                                    _dbg(f"文本分块完成: {chunk_result.get('total_chunks', 0)} 块")
+                                except Exception as e:
+                                    _dbg(f"文本分块异常: {e}")
+                                    chunk_report = {'error': str(e)}
+                            
+                            # 更新 refine_report
+                            refine_report['chunking'] = chunk_report
                     except Exception as e:
                         _dbg(f"Trafilatura 提取异常: {e}")
                 
@@ -707,6 +735,23 @@ def _extract_youtube_id(url: str) -> Optional[str]:
         return None
 
 
+# -------------------- 文本分块器配置 --------------------
+
+def is_chunker_enabled() -> bool:
+    """检查文本分块器是否启用"""
+    return os.getenv('CHUNKER_ENABLED', 'true').lower() == 'true'
+
+
+def get_chunker_config() -> Dict[str, Any]:
+    """获取文本分块器配置"""
+    return {
+        'chunk_size': int(os.getenv('CHUNKER_CHUNK_SIZE', '1000')),
+        'chunk_overlap': int(os.getenv('CHUNKER_CHUNK_OVERLAP', '200')),
+        'max_tokens': int(os.getenv('CHUNKER_MAX_TOKENS', '4000')),
+        'method': os.getenv('CHUNKER_METHOD', 'recursive')
+    }
+
+
 async def _fetch_youtube_transcript_async(video_id: str) -> Optional[str]:
     try:
         if not YouTubeTranscriptApi:
@@ -745,6 +790,23 @@ async def _fetch_youtube_transcript_async(video_id: str) -> Optional[str]:
         return text
     except Exception:
         return None
+
+
+# -------------------- 文本分块器配置 --------------------
+
+def is_chunker_enabled() -> bool:
+    """检查文本分块器是否启用"""
+    return os.getenv('CHUNKER_ENABLED', 'true').lower() == 'true'
+
+
+def get_chunker_config() -> Dict[str, Any]:
+    """获取文本分块器配置"""
+    return {
+        'chunk_size': int(os.getenv('CHUNKER_CHUNK_SIZE', '1000')),
+        'chunk_overlap': int(os.getenv('CHUNKER_CHUNK_OVERLAP', '200')),
+        'max_tokens': int(os.getenv('CHUNKER_MAX_TOKENS', '4000')),
+        'method': os.getenv('CHUNKER_METHOD', 'recursive')
+    }
 
 
 def _get_proxies() -> Optional[Dict[str, str]]:
@@ -820,6 +882,23 @@ def _extract_charset_from_meta(html_snippet: str) -> Optional[str]:
         return None
     except Exception:
         return None
+
+
+# -------------------- 文本分块器配置 --------------------
+
+def is_chunker_enabled() -> bool:
+    """检查文本分块器是否启用"""
+    return os.getenv('CHUNKER_ENABLED', 'true').lower() == 'true'
+
+
+def get_chunker_config() -> Dict[str, Any]:
+    """获取文本分块器配置"""
+    return {
+        'chunk_size': int(os.getenv('CHUNKER_CHUNK_SIZE', '1000')),
+        'chunk_overlap': int(os.getenv('CHUNKER_CHUNK_OVERLAP', '200')),
+        'max_tokens': int(os.getenv('CHUNKER_MAX_TOKENS', '4000')),
+        'method': os.getenv('CHUNKER_METHOD', 'recursive')
+    }
 
 
 def _replacement_ratio(s: str) -> float:
@@ -940,6 +1019,23 @@ async def _try_oembed(url: str, soup: BeautifulSoup, client: httpx.AsyncClient) 
         return None
 
 
+# -------------------- 文本分块器配置 --------------------
+
+def is_chunker_enabled() -> bool:
+    """检查文本分块器是否启用"""
+    return os.getenv('CHUNKER_ENABLED', 'true').lower() == 'true'
+
+
+def get_chunker_config() -> Dict[str, Any]:
+    """获取文本分块器配置"""
+    return {
+        'chunk_size': int(os.getenv('CHUNKER_CHUNK_SIZE', '1000')),
+        'chunk_overlap': int(os.getenv('CHUNKER_CHUNK_OVERLAP', '200')),
+        'max_tokens': int(os.getenv('CHUNKER_MAX_TOKENS', '4000')),
+        'method': os.getenv('CHUNKER_METHOD', 'recursive')
+    }
+
+
 def _try_jsonld(soup: BeautifulSoup) -> Optional[Dict[str, Any]]:
     try:
         scripts = soup.find_all('script', type='application/ld+json')
@@ -976,6 +1072,23 @@ def _try_jsonld(soup: BeautifulSoup) -> Optional[Dict[str, Any]]:
         return None
     except Exception:
         return None
+
+
+# -------------------- 文本分块器配置 --------------------
+
+def is_chunker_enabled() -> bool:
+    """检查文本分块器是否启用"""
+    return os.getenv('CHUNKER_ENABLED', 'true').lower() == 'true'
+
+
+def get_chunker_config() -> Dict[str, Any]:
+    """获取文本分块器配置"""
+    return {
+        'chunk_size': int(os.getenv('CHUNKER_CHUNK_SIZE', '1000')),
+        'chunk_overlap': int(os.getenv('CHUNKER_CHUNK_OVERLAP', '200')),
+        'max_tokens': int(os.getenv('CHUNKER_MAX_TOKENS', '4000')),
+        'method': os.getenv('CHUNKER_METHOD', 'recursive')
+    }
 
 
 async def _try_rss(url: str, soup: BeautifulSoup, client: httpx.AsyncClient) -> Optional[Dict[str, Any]]:
@@ -1034,6 +1147,23 @@ async def _try_rss(url: str, soup: BeautifulSoup, client: httpx.AsyncClient) -> 
         return None
 
 
+# -------------------- 文本分块器配置 --------------------
+
+def is_chunker_enabled() -> bool:
+    """检查文本分块器是否启用"""
+    return os.getenv('CHUNKER_ENABLED', 'true').lower() == 'true'
+
+
+def get_chunker_config() -> Dict[str, Any]:
+    """获取文本分块器配置"""
+    return {
+        'chunk_size': int(os.getenv('CHUNKER_CHUNK_SIZE', '1000')),
+        'chunk_overlap': int(os.getenv('CHUNKER_CHUNK_OVERLAP', '200')),
+        'max_tokens': int(os.getenv('CHUNKER_MAX_TOKENS', '4000')),
+        'method': os.getenv('CHUNKER_METHOD', 'recursive')
+    }
+
+
 # 预留：域名适配器（按需扩展）
 DOMAIN_ADAPTERS: Dict[str, Callable[[str, httpx.AsyncClient], Any]] = {
     'dev.to': None,           # 预留，实际在 _adapter_devto 中实现
@@ -1065,6 +1195,23 @@ async def _apply_domain_adapter(url: str, client: httpx.AsyncClient) -> Optional
         return data
     except Exception:
         return None
+
+
+# -------------------- 文本分块器配置 --------------------
+
+def is_chunker_enabled() -> bool:
+    """检查文本分块器是否启用"""
+    return os.getenv('CHUNKER_ENABLED', 'true').lower() == 'true'
+
+
+def get_chunker_config() -> Dict[str, Any]:
+    """获取文本分块器配置"""
+    return {
+        'chunk_size': int(os.getenv('CHUNKER_CHUNK_SIZE', '1000')),
+        'chunk_overlap': int(os.getenv('CHUNKER_CHUNK_OVERLAP', '200')),
+        'max_tokens': int(os.getenv('CHUNKER_MAX_TOKENS', '4000')),
+        'method': os.getenv('CHUNKER_METHOD', 'recursive')
+    }
 
 
 # -------------------- 简易缓存：ETag/Last-Modified + TTL --------------------
@@ -1117,6 +1264,23 @@ async def _adapter_devto(url: str, client: httpx.AsyncClient) -> Optional[Dict[s
         return None
 
 
+# -------------------- 文本分块器配置 --------------------
+
+def is_chunker_enabled() -> bool:
+    """检查文本分块器是否启用"""
+    return os.getenv('CHUNKER_ENABLED', 'true').lower() == 'true'
+
+
+def get_chunker_config() -> Dict[str, Any]:
+    """获取文本分块器配置"""
+    return {
+        'chunk_size': int(os.getenv('CHUNKER_CHUNK_SIZE', '1000')),
+        'chunk_overlap': int(os.getenv('CHUNKER_CHUNK_OVERLAP', '200')),
+        'max_tokens': int(os.getenv('CHUNKER_MAX_TOKENS', '4000')),
+        'method': os.getenv('CHUNKER_METHOD', 'recursive')
+    }
+
+
 async def _adapter_reddit(url: str, client: httpx.AsyncClient) -> Optional[Dict[str, Any]]:
     try:
         # reddit 文章增加 .json 获取结构化
@@ -1140,3 +1304,20 @@ async def _adapter_reddit(url: str, client: httpx.AsyncClient) -> Optional[Dict[
         }
     except Exception:
         return None
+
+
+# -------------------- 文本分块器配置 --------------------
+
+def is_chunker_enabled() -> bool:
+    """检查文本分块器是否启用"""
+    return os.getenv('CHUNKER_ENABLED', 'true').lower() == 'true'
+
+
+def get_chunker_config() -> Dict[str, Any]:
+    """获取文本分块器配置"""
+    return {
+        'chunk_size': int(os.getenv('CHUNKER_CHUNK_SIZE', '1000')),
+        'chunk_overlap': int(os.getenv('CHUNKER_CHUNK_OVERLAP', '200')),
+        'max_tokens': int(os.getenv('CHUNKER_MAX_TOKENS', '4000')),
+        'method': os.getenv('CHUNKER_METHOD', 'recursive')
+    }

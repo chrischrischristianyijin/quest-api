@@ -12,7 +12,7 @@ import os
 load_dotenv()
 
 # 导入路由
-from app.routers import auth, user, insights, user_tags, metadata, waitlist
+from app.routers import auth, user, insights, user_tags, metadata, waitlist, insight_chunks
 from app.core.config import settings
 from app.core.database import init_supabase
 
@@ -65,6 +65,7 @@ app.include_router(insights.router, prefix="/api/v1/insights", tags=["见解"])
 app.include_router(user_tags.router, prefix="/api/v1/user-tags", tags=["用户标签"])
 app.include_router(metadata.router, prefix="/api/v1/metadata", tags=["元数据"])
 app.include_router(waitlist.router, prefix="/api/v1/waitlist", tags=["等待列表"])
+app.include_router(insight_chunks.router, tags=["分块数据"])
 
 
 
