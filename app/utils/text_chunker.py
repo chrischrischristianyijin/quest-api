@@ -232,27 +232,28 @@ def create_chunker(
 
 def chunk_text_for_llm(
     text: str,
-    max_tokens: int = 4000,
-    chunk_size: int = 1000,
-    chunk_overlap: int = 200,
+    max_tokens: int = 1000,  # 默认调整为RAG最佳实践
+    chunk_size: int = 2000,   # 默认调整为RAG最佳实践
+    chunk_overlap: int = 400, # 默认调整为RAG最佳实践
     method: str = "recursive"
 ) -> Dict[str, Any]:
     """
-    为 LLM 优化文本分块
+    为 LLM 和 RAG 优化文本分块
     
     Args:
         text: 输入文本
-        max_tokens: 最大 token 数
-        chunk_size: 块大小
-        chunk_overlap: 重叠大小
+        max_tokens: 最大 token 数 (推荐500-1000)
+        chunk_size: 块大小 (字符数)
+        chunk_overlap: 重叠大小 (字符数)
         method: 分块方法
     
     Returns:
         分块结果
     """
     # 根据 max_tokens 调整 chunk_size
-    # 粗略估算：1 token ≈ 4 字符
-    estimated_chunk_size = min(chunk_size, max_tokens * 4)
+    # 更精确的token估算：中文约2.5字符/token，英文约4字符/token
+    # 使用保守估算：1 token ≈ 3 字符
+    estimated_chunk_size = min(chunk_size, max_tokens * 3)
     
     chunker = create_chunker(
         chunk_size=estimated_chunk_size,
@@ -262,10 +263,11 @@ def chunk_text_for_llm(
     
     result = chunker.chunk_text(text, method)
     
-    # 添加 LLM 相关信息
+    # 添加 LLM 和 RAG 相关信息
     result["llm_optimized"] = True
+    result["rag_optimized"] = True  # 标记为RAG优化
     result["max_tokens"] = max_tokens
-    result["estimated_tokens_per_chunk"] = estimated_chunk_size // 4
+    result["estimated_tokens_per_chunk"] = estimated_chunk_size // 3  # 更精确的估算
     
     return result
 

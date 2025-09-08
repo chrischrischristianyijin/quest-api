@@ -743,11 +743,11 @@ def is_chunker_enabled() -> bool:
 
 
 def get_chunker_config() -> Dict[str, Any]:
-    """获取文本分块器配置"""
+    """获取文本分块器配置 - 优化为RAG最佳实践"""
     return {
-        'chunk_size': int(os.getenv('CHUNKER_CHUNK_SIZE', '1000')),
-        'chunk_overlap': int(os.getenv('CHUNKER_CHUNK_OVERLAP', '200')),
-        'max_tokens': int(os.getenv('CHUNKER_MAX_TOKENS', '4000')),
+        'chunk_size': int(os.getenv('CHUNKER_CHUNK_SIZE', '2000')),  # 约500-750 tokens
+        'chunk_overlap': int(os.getenv('CHUNKER_CHUNK_OVERLAP', '400')),  # 增加重叠保持语义连续性
+        'max_tokens': int(os.getenv('CHUNKER_MAX_TOKENS', '1000')),  # RAG最佳实践：500-1000 tokens
         'method': os.getenv('CHUNKER_METHOD', 'recursive')
     }
 
@@ -800,11 +800,11 @@ def is_chunker_enabled() -> bool:
 
 
 def get_chunker_config() -> Dict[str, Any]:
-    """获取文本分块器配置"""
+    """获取文本分块器配置 - 优化为RAG最佳实践"""
     return {
-        'chunk_size': int(os.getenv('CHUNKER_CHUNK_SIZE', '1000')),
-        'chunk_overlap': int(os.getenv('CHUNKER_CHUNK_OVERLAP', '200')),
-        'max_tokens': int(os.getenv('CHUNKER_MAX_TOKENS', '4000')),
+        'chunk_size': int(os.getenv('CHUNKER_CHUNK_SIZE', '2000')),  # 约500-750 tokens
+        'chunk_overlap': int(os.getenv('CHUNKER_CHUNK_OVERLAP', '400')),  # 增加重叠保持语义连续性
+        'max_tokens': int(os.getenv('CHUNKER_MAX_TOKENS', '1000')),  # RAG最佳实践：500-1000 tokens
         'method': os.getenv('CHUNKER_METHOD', 'recursive')
     }
 
@@ -892,11 +892,11 @@ def is_chunker_enabled() -> bool:
 
 
 def get_chunker_config() -> Dict[str, Any]:
-    """获取文本分块器配置"""
+    """获取文本分块器配置 - 优化为RAG最佳实践"""
     return {
-        'chunk_size': int(os.getenv('CHUNKER_CHUNK_SIZE', '1000')),
-        'chunk_overlap': int(os.getenv('CHUNKER_CHUNK_OVERLAP', '200')),
-        'max_tokens': int(os.getenv('CHUNKER_MAX_TOKENS', '4000')),
+        'chunk_size': int(os.getenv('CHUNKER_CHUNK_SIZE', '2000')),  # 约500-750 tokens
+        'chunk_overlap': int(os.getenv('CHUNKER_CHUNK_OVERLAP', '400')),  # 增加重叠保持语义连续性
+        'max_tokens': int(os.getenv('CHUNKER_MAX_TOKENS', '1000')),  # RAG最佳实践：500-1000 tokens
         'method': os.getenv('CHUNKER_METHOD', 'recursive')
     }
 
@@ -1027,11 +1027,11 @@ def is_chunker_enabled() -> bool:
 
 
 def get_chunker_config() -> Dict[str, Any]:
-    """获取文本分块器配置"""
+    """获取文本分块器配置 - 优化为RAG最佳实践"""
     return {
-        'chunk_size': int(os.getenv('CHUNKER_CHUNK_SIZE', '1000')),
-        'chunk_overlap': int(os.getenv('CHUNKER_CHUNK_OVERLAP', '200')),
-        'max_tokens': int(os.getenv('CHUNKER_MAX_TOKENS', '4000')),
+        'chunk_size': int(os.getenv('CHUNKER_CHUNK_SIZE', '2000')),  # 约500-750 tokens
+        'chunk_overlap': int(os.getenv('CHUNKER_CHUNK_OVERLAP', '400')),  # 增加重叠保持语义连续性
+        'max_tokens': int(os.getenv('CHUNKER_MAX_TOKENS', '1000')),  # RAG最佳实践：500-1000 tokens
         'method': os.getenv('CHUNKER_METHOD', 'recursive')
     }
 
@@ -1082,11 +1082,11 @@ def is_chunker_enabled() -> bool:
 
 
 def get_chunker_config() -> Dict[str, Any]:
-    """获取文本分块器配置"""
+    """获取文本分块器配置 - 优化为RAG最佳实践"""
     return {
-        'chunk_size': int(os.getenv('CHUNKER_CHUNK_SIZE', '1000')),
-        'chunk_overlap': int(os.getenv('CHUNKER_CHUNK_OVERLAP', '200')),
-        'max_tokens': int(os.getenv('CHUNKER_MAX_TOKENS', '4000')),
+        'chunk_size': int(os.getenv('CHUNKER_CHUNK_SIZE', '2000')),  # 约500-750 tokens
+        'chunk_overlap': int(os.getenv('CHUNKER_CHUNK_OVERLAP', '400')),  # 增加重叠保持语义连续性
+        'max_tokens': int(os.getenv('CHUNKER_MAX_TOKENS', '1000')),  # RAG最佳实践：500-1000 tokens
         'method': os.getenv('CHUNKER_METHOD', 'recursive')
     }
 
@@ -1155,11 +1155,11 @@ def is_chunker_enabled() -> bool:
 
 
 def get_chunker_config() -> Dict[str, Any]:
-    """获取文本分块器配置"""
+    """获取文本分块器配置 - 优化为RAG最佳实践"""
     return {
-        'chunk_size': int(os.getenv('CHUNKER_CHUNK_SIZE', '1000')),
-        'chunk_overlap': int(os.getenv('CHUNKER_CHUNK_OVERLAP', '200')),
-        'max_tokens': int(os.getenv('CHUNKER_MAX_TOKENS', '4000')),
+        'chunk_size': int(os.getenv('CHUNKER_CHUNK_SIZE', '2000')),  # 约500-750 tokens
+        'chunk_overlap': int(os.getenv('CHUNKER_CHUNK_OVERLAP', '400')),  # 增加重叠保持语义连续性
+        'max_tokens': int(os.getenv('CHUNKER_MAX_TOKENS', '1000')),  # RAG最佳实践：500-1000 tokens
         'method': os.getenv('CHUNKER_METHOD', 'recursive')
     }
 
@@ -1205,11 +1205,11 @@ def is_chunker_enabled() -> bool:
 
 
 def get_chunker_config() -> Dict[str, Any]:
-    """获取文本分块器配置"""
+    """获取文本分块器配置 - 优化为RAG最佳实践"""
     return {
-        'chunk_size': int(os.getenv('CHUNKER_CHUNK_SIZE', '1000')),
-        'chunk_overlap': int(os.getenv('CHUNKER_CHUNK_OVERLAP', '200')),
-        'max_tokens': int(os.getenv('CHUNKER_MAX_TOKENS', '4000')),
+        'chunk_size': int(os.getenv('CHUNKER_CHUNK_SIZE', '2000')),  # 约500-750 tokens
+        'chunk_overlap': int(os.getenv('CHUNKER_CHUNK_OVERLAP', '400')),  # 增加重叠保持语义连续性
+        'max_tokens': int(os.getenv('CHUNKER_MAX_TOKENS', '1000')),  # RAG最佳实践：500-1000 tokens
         'method': os.getenv('CHUNKER_METHOD', 'recursive')
     }
 
@@ -1272,11 +1272,11 @@ def is_chunker_enabled() -> bool:
 
 
 def get_chunker_config() -> Dict[str, Any]:
-    """获取文本分块器配置"""
+    """获取文本分块器配置 - 优化为RAG最佳实践"""
     return {
-        'chunk_size': int(os.getenv('CHUNKER_CHUNK_SIZE', '1000')),
-        'chunk_overlap': int(os.getenv('CHUNKER_CHUNK_OVERLAP', '200')),
-        'max_tokens': int(os.getenv('CHUNKER_MAX_TOKENS', '4000')),
+        'chunk_size': int(os.getenv('CHUNKER_CHUNK_SIZE', '2000')),  # 约500-750 tokens
+        'chunk_overlap': int(os.getenv('CHUNKER_CHUNK_OVERLAP', '400')),  # 增加重叠保持语义连续性
+        'max_tokens': int(os.getenv('CHUNKER_MAX_TOKENS', '1000')),  # RAG最佳实践：500-1000 tokens
         'method': os.getenv('CHUNKER_METHOD', 'recursive')
     }
 
@@ -1314,10 +1314,10 @@ def is_chunker_enabled() -> bool:
 
 
 def get_chunker_config() -> Dict[str, Any]:
-    """获取文本分块器配置"""
+    """获取文本分块器配置 - 优化为RAG最佳实践"""
     return {
-        'chunk_size': int(os.getenv('CHUNKER_CHUNK_SIZE', '1000')),
-        'chunk_overlap': int(os.getenv('CHUNKER_CHUNK_OVERLAP', '200')),
-        'max_tokens': int(os.getenv('CHUNKER_MAX_TOKENS', '4000')),
+        'chunk_size': int(os.getenv('CHUNKER_CHUNK_SIZE', '2000')),  # 约500-750 tokens
+        'chunk_overlap': int(os.getenv('CHUNKER_CHUNK_OVERLAP', '400')),  # 增加重叠保持语义连续性
+        'max_tokens': int(os.getenv('CHUNKER_MAX_TOKENS', '1000')),  # RAG最佳实践：500-1000 tokens
         'method': os.getenv('CHUNKER_METHOD', 'recursive')
     }
