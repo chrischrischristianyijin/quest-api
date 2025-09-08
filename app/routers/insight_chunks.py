@@ -8,13 +8,23 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from app.core.database import get_supabase_service
 from app.models.insight_chunk import InsightChunkSummary, InsightChunksResponse, create_chunks_response
-from app.services.auth_service import get_current_user_id
+from app.services.auth_service import AuthService
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from app.services.embedding_service import get_embedding_service, is_embedding_enabled
 import logging
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/insight-chunks", tags=["insight-chunks"])
+
+# 认证相关
+security = HTTPBearer()
+auth_service = AuthService()
+
+async def get_current_user_id(credentials: HTTPAuthorizationCredentials = Depends(security)) -> UUID:
+    """获取当前用户 ID"""
+    current_user = await auth_service.get_current_user(credentials.credentials)
+    return UUID(current_user['id'])
 
 
 @router.get("/{insight_id}", response_model=InsightChunksResponse)
