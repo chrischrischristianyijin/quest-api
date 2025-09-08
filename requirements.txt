@@ -28,3 +28,4 @@ jieba>=0.42.1
 lxml_html_clean
 langchain>=0.1.0
 langchain-text-splitters>=0.0.1
+openai>=1.0.0
