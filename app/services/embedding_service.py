@@ -10,6 +10,7 @@ from typing import List, Dict, Any, Optional, Tuple
 import numpy as np
 from dataclasses import dataclass
 import os
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +124,7 @@ class EmbeddingService:
                 'dimensions': len(embedding),
                 'tokens_used': tokens_used,
                 'text_length': len(cleaned_text),
-                'generated_at': time.time()
+                'generated_at': datetime.now().isoformat()
             }
             
         except Exception as e:
@@ -178,7 +179,7 @@ class EmbeddingService:
                         'dimensions': len(embedding_data.embedding),
                         'tokens_used': response.usage.total_tokens // len(batch_texts),
                         'text_length': len(batch_texts[i]),
-                        'generated_at': time.time()
+                        'generated_at': datetime.now().isoformat()
                     }
                 
                 logger.debug(f"批量生成 embedding 完成: {batch_start}-{batch_end-1}")

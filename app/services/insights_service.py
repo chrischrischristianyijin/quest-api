@@ -934,11 +934,33 @@ async def _save_insight_chunks(insight_id: UUID, text: str, refine_report: Dict[
         if hasattr(delete_res, 'error') and delete_res.error:
             logger.warning(f"[分块保存] 删除旧分块数据失败: {delete_res.error}")
         
+        # 数据清理（确保时间戳格式正确）
+        def _sanitize_chunk_data(obj: Any) -> Any:
+            try:
+                if obj is None:
+                    return None
+                if isinstance(obj, str):
+                    return obj.replace('\x00', ' ').replace('\u0000', ' ')
+                if isinstance(obj, (datetime, date)):
+                    return obj.isoformat()
+                if isinstance(obj, dict):
+                    clean = {}
+                    for k, v in obj.items():
+                        clean[k] = _sanitize_chunk_data(v)
+                    return clean
+                if isinstance(obj, list):
+                    return [_sanitize_chunk_data(v) for v in obj]
+                return obj
+            except Exception:
+                return obj
+
+        safe_chunk_data = _sanitize_chunk_data(deepcopy(chunk_data))
+        
         # 批量插入新分块数据
         insert_res = (
             supabase_service
             .table('insight_chunks')
-            .insert(chunk_data)
+            .insert(safe_chunk_data)
             .execute()
         )
         
