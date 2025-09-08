@@ -51,7 +51,7 @@ services:
       # Sumy 配置已移除 - 直接使用 Trafilatura
       - key: PAGE_TEXT_MAX_LEN
         value: 500000
-      # Trafilatura 正文提取配置
+      # Trafilatura 正文提取配置 - 调整为更宽松的提取策略
       - key: TRAFILATURA_ENABLED
         value: true
       - key: TRAFILATURA_INCLUDE_COMMENTS
@@ -61,40 +61,40 @@ services:
       - key: TRAFILATURA_INCLUDE_FORMATTING
         value: false
       - key: TRAFILATURA_DEDUPLICATE
-        value: true
+        value: false  # 禁用去重，保留更多内容
       - key: TRAFILATURA_FAVOR_PRECISION
-        value: true
+        value: false  # 不优先精确度，避免过度过滤
       - key: TRAFILATURA_FAVOR_RECALL
-        value: false
-      # TF-IDF 预处理优化配置 - 优化后的参数
+        value: true   # 优先召回率，保留更多内容
+      # TF-IDF 预处理优化配置 - 调整为更宽松的参数以避免过度过滤
       - key: TFIDF_OPTIMIZER_ENABLED
         value: true
       - key: TFIDF_MIN_TEXT_LENGTH
-        value: 80
+        value: 50  # 降低最小文本长度要求
       - key: TFIDF_MAX_FEATURES
         value: 10000
       - key: TFIDF_MIN_DF
-        value: 2
+        value: 1  # 降低最小文档频率，保留更多内容
       - key: TFIDF_MAX_DF
-        value: 0.8
+        value: 0.9  # 提高最大文档频率，保留更多内容
       - key: TFIDF_SCORE_FLOOR
-        value: 0.06
+        value: 0.04  # 适中的得分下限，保持质量控制
       - key: TFIDF_CONTENT_RATIO
-        value: 0.2
+        value: 0.5   # 适中的内容比例，保留50%的内容
       - key: TFIDF_MIN_KEEP_K
-        value: 80
+        value: 60    # 适中的最少保留块数
       - key: TFIDF_PERCENTILE_THRESHOLD
-        value: 0.80
+        value: 0.70  # 适中的分位阈值，保持质量控制
       - key: TFIDF_REMOVE_LOW_QUALITY
-        value: true
+        value: true   # 开启低质量过滤，保持适度质量控制
       - key: TFIDF_ENHANCE_BLOCKS
         value: true
       - key: TFIDF_ENABLE_CHINESE_SEG
         value: true
       - key: TFIDF_MAX_LINK_DENSITY
-        value: 0.3
+        value: 0.4  # 适中的链接密度阈值
       - key: TFIDF_MIN_ALPHANUMERIC_RATIO
-        value: 0.5
+        value: 0.4  # 适中的字母数字比例要求
       # 文本分块器配置 - 优化为RAG最佳实践 (500-1000 tokens)
       - key: CHUNKER_ENABLED
         value: true

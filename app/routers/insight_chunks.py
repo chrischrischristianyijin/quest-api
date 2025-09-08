@@ -359,6 +359,187 @@ async def find_similar_chunks(
         raise HTTPException(status_code=500, detail="查找相似分块失败")
 
 
+@router.get("/search/advanced")
+async def advanced_chunk_search(
+    current_user_id: UUID = Depends(get_current_user_id),
+    insight_id: Optional[UUID] = Query(None, description="指定insight ID"),
+    min_chunk_size: Optional[int] = Query(None, ge=1, description="最小分块大小"),
+    max_chunk_size: Optional[int] = Query(None, ge=1, description="最大分块大小"),
+    min_tokens: Optional[int] = Query(None, ge=1, description="最小token数"),
+    max_tokens: Optional[int] = Query(None, ge=1, description="最大token数"),
+    has_embedding: Optional[bool] = Query(None, description="是否有embedding"),
+    chunk_method: Optional[str] = Query(None, description="分块方法"),
+    created_after: Optional[str] = Query(None, description="创建时间之后 (ISO格式)"),
+    created_before: Optional[str] = Query(None, description="创建时间之前 (ISO格式)"),
+    limit: int = Query(50, ge=1, le=200, description="限制返回数量"),
+    offset: int = Query(0, ge=0, description="偏移量")
+):
+    """
+    高级分块搜索 - 支持多种筛选条件
+    
+    Args:
+        current_user_id: 当前用户 ID
+        insight_id: 指定insight ID
+        min_chunk_size: 最小分块大小
+        max_chunk_size: 最大分块大小
+        min_tokens: 最小token数
+        max_tokens: 最大token数
+        has_embedding: 是否有embedding
+        chunk_method: 分块方法
+        created_after: 创建时间之后
+        created_before: 创建时间之前
+        limit: 限制返回数量
+        offset: 偏移量
+    
+    Returns:
+        dict: 筛选后的分块列表
+    """
+    try:
+        supabase_service = get_supabase_service()
+        
+        # 构建基础查询
+        query = supabase_service.table('insight_chunks').select('*')
+        
+        # 权限过滤：只查询用户自己的insights的分块
+        if insight_id:
+            # 验证insight是否属于用户
+            insight_check = (
+                supabase_service
+                .table('insights')
+                .select('id')
+                .eq('id', str(insight_id))
+                .eq('user_id', str(current_user_id))
+                .execute()
+            )
+            
+            if not insight_check.data:
+                raise HTTPException(status_code=404, detail="Insight不存在或无权限访问")
+            
+            query = query.eq('insight_id', str(insight_id))
+        else:
+            # 获取用户的所有insight IDs
+            user_insights = (
+                supabase_service
+                .table('insights')
+                .select('id')
+                .eq('user_id', str(current_user_id))
+                .execute()
+            )
+            
+            if user_insights.data:
+                insight_ids = [insight['id'] for insight in user_insights.data]
+                query = query.in_('insight_id', insight_ids)
+            else:
+                return {
+                    "total_chunks": 0,
+                    "chunks": [],
+                    "filters_applied": {}
+                }
+        
+        # 应用筛选条件
+        filters_applied = {}
+        
+        if min_chunk_size is not None:
+            query = query.gte('chunk_size', min_chunk_size)
+            filters_applied['min_chunk_size'] = min_chunk_size
+        
+        if max_chunk_size is not None:
+            query = query.lte('chunk_size', max_chunk_size)
+            filters_applied['max_chunk_size'] = max_chunk_size
+        
+        if min_tokens is not None:
+            query = query.gte('estimated_tokens', min_tokens)
+            filters_applied['min_tokens'] = min_tokens
+        
+        if max_tokens is not None:
+            query = query.lte('estimated_tokens', max_tokens)
+            filters_applied['max_tokens'] = max_tokens
+        
+        if has_embedding is not None:
+            if has_embedding:
+                query = query.not_.is_('embedding', 'null')
+            else:
+                query = query.is_('embedding', 'null')
+            filters_applied['has_embedding'] = has_embedding
+        
+        if chunk_method:
+            query = query.eq('chunk_method', chunk_method)
+            filters_applied['chunk_method'] = chunk_method
+        
+        if created_after:
+            query = query.gte('created_at', created_after)
+            filters_applied['created_after'] = created_after
+        
+        if created_before:
+            query = query.lte('created_at', created_before)
+            filters_applied['created_before'] = created_before
+        
+        # 排序和分页
+        query = query.order('created_at', desc=True)
+        query = query.range(offset, offset + limit - 1)
+        
+        # 执行查询
+        result = query.execute()
+        
+        if hasattr(result, 'error') and result.error:
+            logger.error(f"高级搜索失败: {result.error}")
+            raise HTTPException(status_code=500, detail="高级搜索失败")
+        
+        chunks_data = result.data or []
+        
+        # 获取总数（用于分页）
+        count_query = supabase_service.table('insight_chunks').select('id', count='exact')
+        
+        # 重新应用所有筛选条件（除了分页）
+        if insight_id:
+            count_query = count_query.eq('insight_id', str(insight_id))
+        elif 'insight_ids' in locals():
+            count_query = count_query.in_('insight_id', insight_ids)
+        
+        for key, value in filters_applied.items():
+            if key == 'min_chunk_size':
+                count_query = count_query.gte('chunk_size', value)
+            elif key == 'max_chunk_size':
+                count_query = count_query.lte('chunk_size', value)
+            elif key == 'min_tokens':
+                count_query = count_query.gte('estimated_tokens', value)
+            elif key == 'max_tokens':
+                count_query = count_query.lte('estimated_tokens', value)
+            elif key == 'has_embedding':
+                if value:
+                    count_query = count_query.not_.is_('embedding', 'null')
+                else:
+                    count_query = count_query.is_('embedding', 'null')
+            elif key == 'chunk_method':
+                count_query = count_query.eq('chunk_method', value)
+            elif key == 'created_after':
+                count_query = count_query.gte('created_at', value)
+            elif key == 'created_before':
+                count_query = count_query.lte('created_at', value)
+        
+        count_result = count_query.execute()
+        total_count = count_result.count if hasattr(count_result, 'count') else len(chunks_data)
+        
+        logger.info(f"用户 {current_user_id} 执行高级搜索，返回 {len(chunks_data)} 个分块")
+        
+        return {
+            "total_chunks": total_count,
+            "chunks": chunks_data,
+            "filters_applied": filters_applied,
+            "pagination": {
+                "limit": limit,
+                "offset": offset,
+                "has_more": offset + len(chunks_data) < total_count
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"高级搜索异常: {e}")
+        raise HTTPException(status_code=500, detail="高级搜索失败")
+
+
 @router.post("/search")
 async def search_chunks_by_text(
     query_text: str,
@@ -471,3 +652,170 @@ async def search_chunks_by_text(
     except Exception as e:
         logger.error(f"文本搜索异常: {e}")
         raise HTTPException(status_code=500, detail="文本搜索失败")
+
+
+@router.get("/stats")
+async def get_chunks_statistics(
+    current_user_id: UUID = Depends(get_current_user_id),
+    insight_id: Optional[UUID] = Query(None, description="指定insight ID")
+):
+    """
+    获取分块数据统计信息
+    
+    Args:
+        current_user_id: 当前用户 ID
+        insight_id: 指定insight ID（可选）
+    
+    Returns:
+        dict: 统计信息
+    """
+    try:
+        supabase_service = get_supabase_service()
+        
+        # 构建基础查询
+        query = supabase_service.table('insight_chunks').select('*')
+        
+        # 权限过滤
+        if insight_id:
+            # 验证insight是否属于用户
+            insight_check = (
+                supabase_service
+                .table('insights')
+                .select('id')
+                .eq('id', str(insight_id))
+                .eq('user_id', str(current_user_id))
+                .execute()
+            )
+            
+            if not insight_check.data:
+                raise HTTPException(status_code=404, detail="Insight不存在或无权限访问")
+            
+            query = query.eq('insight_id', str(insight_id))
+        else:
+            # 获取用户的所有insight IDs
+            user_insights = (
+                supabase_service
+                .table('insights')
+                .select('id')
+                .eq('user_id', str(current_user_id))
+                .execute()
+            )
+            
+            if user_insights.data:
+                insight_ids = [insight['id'] for insight in user_insights.data]
+                query = query.in_('insight_id', insight_ids)
+            else:
+                return {
+                    "total_chunks": 0,
+                    "total_size": 0,
+                    "total_tokens": 0,
+                    "avg_chunk_size": 0,
+                    "avg_tokens": 0,
+                    "chunks_with_embedding": 0,
+                    "embedding_coverage": 0.0,
+                    "chunk_methods": {},
+                    "size_distribution": {},
+                    "token_distribution": {}
+                }
+        
+        # 执行查询
+        result = query.execute()
+        
+        if hasattr(result, 'error') and result.error:
+            logger.error(f"获取统计信息失败: {result.error}")
+            raise HTTPException(status_code=500, detail="获取统计信息失败")
+        
+        chunks_data = result.data or []
+        
+        if not chunks_data:
+            return {
+                "total_chunks": 0,
+                "total_size": 0,
+                "total_tokens": 0,
+                "avg_chunk_size": 0,
+                "avg_tokens": 0,
+                "chunks_with_embedding": 0,
+                "embedding_coverage": 0.0,
+                "chunk_methods": {},
+                "size_distribution": {},
+                "token_distribution": {}
+            }
+        
+        # 计算基础统计
+        total_chunks = len(chunks_data)
+        total_size = sum(chunk.get('chunk_size', 0) for chunk in chunks_data)
+        total_tokens = sum(chunk.get('estimated_tokens', 0) for chunk in chunks_data if chunk.get('estimated_tokens'))
+        chunks_with_embedding = sum(1 for chunk in chunks_data if chunk.get('embedding'))
+        
+        # 计算平均值
+        avg_chunk_size = total_size / total_chunks if total_chunks > 0 else 0
+        avg_tokens = total_tokens / total_chunks if total_chunks > 0 else 0
+        embedding_coverage = chunks_with_embedding / total_chunks if total_chunks > 0 else 0
+        
+        # 分块方法统计
+        chunk_methods = {}
+        for chunk in chunks_data:
+            method = chunk.get('chunk_method', 'unknown')
+            chunk_methods[method] = chunk_methods.get(method, 0) + 1
+        
+        # 大小分布统计
+        size_ranges = {
+            "small (<500)": 0,
+            "medium (500-1500)": 0,
+            "large (1500-3000)": 0,
+            "xlarge (>3000)": 0
+        }
+        
+        for chunk in chunks_data:
+            size = chunk.get('chunk_size', 0)
+            if size < 500:
+                size_ranges["small (<500)"] += 1
+            elif size < 1500:
+                size_ranges["medium (500-1500)"] += 1
+            elif size < 3000:
+                size_ranges["large (1500-3000)"] += 1
+            else:
+                size_ranges["xlarge (>3000)"] += 1
+        
+        # Token分布统计
+        token_ranges = {
+            "low (<200)": 0,
+            "medium (200-500)": 0,
+            "high (500-1000)": 0,
+            "very_high (>1000)": 0
+        }
+        
+        for chunk in chunks_data:
+            tokens = chunk.get('estimated_tokens', 0)
+            if tokens < 200:
+                token_ranges["low (<200)"] += 1
+            elif tokens < 500:
+                token_ranges["medium (200-500)"] += 1
+            elif tokens < 1000:
+                token_ranges["high (500-1000)"] += 1
+            else:
+                token_ranges["very_high (>1000)"] += 1
+        
+        statistics = {
+            "total_chunks": total_chunks,
+            "total_size": total_size,
+            "total_tokens": total_tokens,
+            "avg_chunk_size": round(avg_chunk_size, 2),
+            "avg_tokens": round(avg_tokens, 2),
+            "chunks_with_embedding": chunks_with_embedding,
+            "embedding_coverage": round(embedding_coverage * 100, 2),  # 百分比
+            "chunk_methods": chunk_methods,
+            "size_distribution": size_ranges,
+            "token_distribution": token_ranges,
+            "scope": "single_insight" if insight_id else "all_insights"
+        }
+        
+        logger.info(f"用户 {current_user_id} 获取分块统计信息，总分块数: {total_chunks}")
+        
+        return statistics
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取统计信息异常: {e}")
+        raise HTTPException(status_code=500, detail="获取统计信息失败")

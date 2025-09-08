@@ -568,7 +568,9 @@ class InsightsService:
 
             cleaned_text = raw_text.strip()
             if cleaned_text:
-                cleaned_text = re.sub(r"\s+", " ", cleaned_text)
+                # 只压缩多余的空白字符，保留段落结构
+                cleaned_text = re.sub(r"[ \t]+", " ", cleaned_text)  # 只压缩空格和制表符
+                cleaned_text = re.sub(r"\n\s*\n", "\n\n", cleaned_text)  # 保留段落分隔
                 # Trafilatura 已经做了很好的内容提取和长度控制
             logger.info(f"[后台任务] 清理后文本长度: {len(cleaned_text) if cleaned_text else 0}")
 

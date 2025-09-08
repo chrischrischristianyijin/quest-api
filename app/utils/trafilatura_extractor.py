@@ -105,19 +105,21 @@ def extract_content_with_trafilatura(
         # 重置缓存（避免内存泄漏）
         reset_caches()
         
-        # 配置提取选项
+        # 配置提取选项 - 调整为更宽松的参数
         config = use_config()
         config.set("DEFAULT", "EXTRACTION_TIMEOUT", "30")
-        config.set("DEFAULT", "MIN_EXTRACTED_SIZE", "200")  # 最小提取长度
-        config.set("DEFAULT", "MIN_OUTPUT_SIZE", "100")     # 最小输出长度
+        config.set("DEFAULT", "MIN_EXTRACTED_SIZE", "50")   # 降低最小提取长度
+        config.set("DEFAULT", "MIN_OUTPUT_SIZE", "25")      # 降低最小输出长度
         
-        # 设置提取策略
-        if favor_precision:
+        # 设置提取策略 - 优先召回率
+        if favor_recall:
+            config.set("DEFAULT", "MIN_EXTRACTED_SIZE", "30")  # 进一步降低
+            config.set("DEFAULT", "MIN_OUTPUT_SIZE", "15")     # 进一步降低
+            config.set("DEFAULT", "MIN_EXTRACTED_COMM_SIZE", "5")
+            config.set("DEFAULT", "MIN_DUPLCHECK_SIZE", "50")
+        elif favor_precision:
             config.set("DEFAULT", "MIN_EXTRACTED_COMM_SIZE", "10")
             config.set("DEFAULT", "MIN_DUPLCHECK_SIZE", "100")
-        elif favor_recall:
-            config.set("DEFAULT", "MIN_EXTRACTED_SIZE", "50")
-            config.set("DEFAULT", "MIN_OUTPUT_SIZE", "25")
         
         # 提取正文内容
         extracted_text = trafilatura.extract(
