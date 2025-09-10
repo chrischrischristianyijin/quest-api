@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends, Query
-from sqlalchemy.orm import Session
-from typing import List, Optional, Union
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from typing import List, Optional
 from uuid import UUID
 import logging
 
@@ -12,21 +12,25 @@ from app.models.stack import (
     StackListResponse,
     StackDetailResponse
 )
-from app.core.auth import get_current_user
+from app.services.auth_service import AuthService
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+security = HTTPBearer()
 
 @router.post("/", response_model=StackDetailResponse)
 async def create_stack(
     stack_data: StackCreate,
-    current_user: dict = Depends(get_current_user)
+    credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
     """Create a new stack"""
     try:
+        auth_service = AuthService()
+        current_user = await auth_service.get_current_user(credentials.credentials)
+        
         supabase = get_supabase()
         
         # Insert new stack
@@ -63,10 +67,13 @@ async def get_stacks(
     page: int = Query(1, ge=1, description="Page number"),
     limit: int = Query(20, ge=1, le=100, description="Items per page"),
     include_insights: bool = Query(False, description="Include insights in response"),
-    current_user: dict = Depends(get_current_user)
+    credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
     """Get user's stacks with optional insights"""
     try:
+        auth_service = AuthService()
+        current_user = await auth_service.get_current_user(credentials.credentials)
+        
         supabase = get_supabase()
         
         # Calculate offset
@@ -133,10 +140,13 @@ async def get_stacks(
 @router.get("/{stack_id}", response_model=StackDetailResponse)
 async def get_stack(
     stack_id: int,
-    current_user: dict = Depends(get_current_user)
+    credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
     """Get a specific stack by ID with its insights"""
     try:
+        auth_service = AuthService()
+        current_user = await auth_service.get_current_user(credentials.credentials)
+        
         supabase = get_supabase()
         
         # Get stack with insights
@@ -185,10 +195,13 @@ async def get_stack(
 async def update_stack(
     stack_id: int,
     stack_data: StackUpdate,
-    current_user: dict = Depends(get_current_user)
+    credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
     """Update a stack"""
     try:
+        auth_service = AuthService()
+        current_user = await auth_service.get_current_user(credentials.credentials)
+        
         supabase = get_supabase()
         
         # Prepare update data
@@ -231,10 +244,13 @@ async def update_stack(
 @router.delete("/{stack_id}")
 async def delete_stack(
     stack_id: int,
-    current_user: dict = Depends(get_current_user)
+    credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
     """Delete a stack and remove stack_id from all its insights"""
     try:
+        auth_service = AuthService()
+        current_user = await auth_service.get_current_user(credentials.credentials)
+        
         supabase = get_supabase()
         
         # First, remove stack_id from all insights in this stack
