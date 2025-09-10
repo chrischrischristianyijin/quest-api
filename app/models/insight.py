@@ -37,6 +37,7 @@ class InsightResponse(InsightBase):
     """Insight响应模型"""
     id: UUID
     user_id: UUID
+    stack_id: Optional[int] = Field(None, description="关联的堆叠ID")
     created_at: datetime
     updated_at: datetime
     tags: List[dict] = Field(default_factory=list, description="标签信息列表")
