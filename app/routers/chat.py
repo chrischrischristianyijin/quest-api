@@ -150,7 +150,7 @@ async def chat_endpoint(request: Request, chat_request: ChatRequest):
         
         # 检查总token数
         total_tokens = sum(estimate_tokens(msg["content"]) for msg in messages)
-        if total_tokens > 8000:  # 限制总token数
+        if total_tokens > 12000:  # 增加总token限制
             logger.warning(f"消息总token数过多 ({total_tokens})，进行截断")
             # 简化处理：只保留系统提示和用户问题
             messages = [

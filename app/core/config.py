@@ -53,15 +53,16 @@ class Settings(BaseSettings):
     
     # AI聊天配置
     CHAT_MODEL: str = "gpt-4o-mini"
-    CHAT_MAX_TOKENS: int = 2000
+    CHAT_MAX_TOKENS: int = 4000  # 增加输出token限制
     CHAT_TEMPERATURE: float = 0.3
     CHAT_DEFAULT_STREAM: bool = True
     
     # RAG配置
     RAG_ENABLED: bool = True
-    RAG_DEFAULT_K: int = 6
-    RAG_DEFAULT_MIN_SCORE: float = 0.2
-    RAG_MAX_CONTEXT_TOKENS: int = 2000
+    RAG_DEFAULT_K: int = 10  # 增加检索数量
+    RAG_DEFAULT_MIN_SCORE: float = 0.15  # 降低相似度阈值
+    RAG_MAX_CONTEXT_TOKENS: int = 4000  # 增加上下文token限制
+    RAG_MAX_CHUNKS_PER_INSIGHT: int = 3  # 每个insight最多检索的chunks数量
     
     # 限流配置
     RATE_LIMIT_REQUESTS_PER_MINUTE: int = 30

@@ -59,8 +59,8 @@ class RAGService:
         self, 
         query_embedding: List[float], 
         user_id: Optional[str] = None,
-        k: int = 6, 
-        min_score: float = 0.2,
+        k: int = 10, 
+        min_score: float = 0.15,
         only_insight: Optional[str] = None
     ) -> List[RAGChunk]:
         """检索相关分块 - 支持多种检索策略"""
@@ -90,8 +90,8 @@ class RAGService:
         self, 
         query_embedding: List[float], 
         user_id: Optional[str] = None,
-        k: int = 6, 
-        min_score: float = 0.2,
+        k: int = 10, 
+        min_score: float = 0.15,
         only_insight: Optional[str] = None
     ) -> List[RAGChunk]:
         """优化的检索方法，只查询用户相关的insights"""
@@ -168,18 +168,42 @@ class RAGService:
                         logger.warning(f"处理embedding失败: {item['id']}, 错误: {e}")
                         continue
             
-            # 4. 按相似度排序并取前k个
+            # 4. 按相似度排序并限制每个insight的chunks数量
             chunks_with_scores.sort(key=lambda x: x.score, reverse=True)
-            top_chunks = chunks_with_scores[:k]
+            
+            # 限制每个insight的chunks数量，避免单一文章占主导
+            max_chunks_per_insight = int(os.getenv('RAG_MAX_CHUNKS_PER_INSIGHT', '3'))
+            insight_chunk_counts = {}
+            filtered_chunks = []
+            
+            for chunk in chunks_with_scores:
+                insight_id = chunk.insight_id
+                current_count = insight_chunk_counts.get(insight_id, 0)
+                
+                if current_count < max_chunks_per_insight:
+                    filtered_chunks.append(chunk)
+                    insight_chunk_counts[insight_id] = current_count + 1
+                    
+                    # 如果已经达到总数量限制，停止
+                    if len(filtered_chunks) >= k:
+                        break
+            
+            top_chunks = filtered_chunks
             
             # 5. 记录检索统计信息
             if top_chunks:
                 avg_score = sum(chunk.score for chunk in top_chunks) / len(top_chunks)
                 logger.info(f"检索到 {len(top_chunks)} 个相关分块（相似度 >= {min_score}，平均相似度: {avg_score:.3f}）")
                 
-                # 记录来源insights
+                # 记录来源insights分布
                 source_insights = set(chunk.insight_id for chunk in top_chunks)
+                insight_distribution = {}
+                for chunk in top_chunks:
+                    insight_id = chunk.insight_id
+                    insight_distribution[insight_id] = insight_distribution.get(insight_id, 0) + 1
+                
                 logger.info(f"来源insights: {len(source_insights)} 个")
+                logger.info(f"每个insight的chunks分布: {dict(list(insight_distribution.items())[:5])}")
             else:
                 logger.info(f"没有找到相似度 >= {min_score} 的分块")
             
@@ -281,7 +305,7 @@ class RAGService:
             return 0.0
     
     
-    def format_context(self, chunks: List[RAGChunk], max_tokens: int = 2000) -> RAGContext:
+    def format_context(self, chunks: List[RAGChunk], max_tokens: int = 4000) -> RAGContext:
         """格式化检索到的分块为上下文"""
         try:
             if not chunks:
@@ -329,9 +353,9 @@ class RAGService:
         self, 
         query: str, 
         user_id: Optional[str] = None,
-        k: int = 6, 
-        min_score: float = 0.2,
-        max_context_tokens: int = 2000
+        k: int = 10, 
+        min_score: float = 0.15,
+        max_context_tokens: int = 4000
     ) -> RAGContext:
         """完整的RAG检索流程 - 支持个性化检索"""
         try:
@@ -361,8 +385,8 @@ class RAGService:
         query_embedding: List[float],
         query_text: str,
         user_id: Optional[str] = None,
-        k: int = 6,
-        min_score: float = 0.2
+        k: int = 10,
+        min_score: float = 0.15
     ) -> List[RAGChunk]:
         """个性化检索策略"""
         try:
@@ -393,9 +417,27 @@ class RAGService:
                             unique_chunks.append(chunk)
                             seen_ids.add(chunk.id)
                     
-                    # 重新排序并取前k个
+                    # 重新排序并限制每个insight的chunks数量
                     unique_chunks.sort(key=lambda x: x.score, reverse=True)
-                    chunks = unique_chunks[:k]
+                    
+                    # 限制每个insight的chunks数量
+                    max_chunks_per_insight = int(os.getenv('RAG_MAX_CHUNKS_PER_INSIGHT', '3'))
+                    insight_chunk_counts = {}
+                    filtered_chunks = []
+                    
+                    for chunk in unique_chunks:
+                        insight_id = chunk.insight_id
+                        current_count = insight_chunk_counts.get(insight_id, 0)
+                        
+                        if current_count < max_chunks_per_insight:
+                            filtered_chunks.append(chunk)
+                            insight_chunk_counts[insight_id] = current_count + 1
+                            
+                            # 如果已经达到总数量限制，停止
+                            if len(filtered_chunks) >= k:
+                                break
+                    
+                    chunks = filtered_chunks
             
             return chunks
             
