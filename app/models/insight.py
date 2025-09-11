@@ -32,6 +32,7 @@ class InsightUpdate(BaseModel):
     image_url: Optional[str] = Field(None, max_length=500, description="图片地址")
     thought: Optional[str] = Field(None, max_length=2000, description="用户的想法/备注")
     tag_ids: Optional[List[UUID]] = Field(None, description="标签ID列表，会替换现有标签")
+    stack_id: Optional[int] = Field(None, description="关联的堆叠ID，设置为null可移除堆叠关联")
 
 class InsightResponse(InsightBase):
     """Insight响应模型"""

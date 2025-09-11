@@ -77,9 +77,9 @@ class InsightsService:
             
             logger.info(f"查询用户 {query_user_id} 的insights，当前用户: {user_id}")
             
-            # 构建查询 - 包含JSONB tags字段，实现零JOIN查询
+            # 构建查询 - 包含JSONB tags字段和stack_id，实现零JOIN查询
             query = supabase.table('insights').select(
-                'id, title, description, url, image_url, created_at, updated_at, tags'
+                'id, title, description, url, image_url, created_at, updated_at, tags, stack_id'
             ).eq('user_id', query_user_id)
             
             # 添加搜索条件
@@ -130,6 +130,7 @@ class InsightsService:
                     "image_url": insight.get('image_url'),
                     "created_at": insight['created_at'],
                     "updated_at": insight['updated_at'],
+                    "stack_id": insight.get('stack_id'),  # 包含stack_id字段
                     "tags": insight_tags  # 🚀 零延迟标签数据！
                 }
                 insight_responses.append(insight_response)
@@ -175,9 +176,9 @@ class InsightsService:
             
             logger.info(f"查询用户 {query_user_id} 的所有insights，当前用户: {user_id}")
             
-            # 构建查询 - 包含JSONB tags字段，实现零JOIN查询
+            # 构建查询 - 包含JSONB tags字段和stack_id，实现零JOIN查询
             query = supabase.table('insights').select(
-                'id, title, description, url, image_url, created_at, updated_at, tags'
+                'id, title, description, url, image_url, created_at, updated_at, tags, stack_id'
             ).eq('user_id', query_user_id)
             
             # 添加搜索条件
@@ -747,6 +748,8 @@ class InsightsService:
                 update_data['url'] = insight_data.url
             if insight_data.image_url is not None:
                 update_data['image_url'] = insight_data.image_url
+            if insight_data.stack_id is not None:
+                update_data['stack_id'] = insight_data.stack_id
             
             # 更新insight
             if update_data:
