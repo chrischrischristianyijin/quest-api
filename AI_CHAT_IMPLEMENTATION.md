@@ -9,10 +9,10 @@
 ### ✅ 已实现功能
 
 1. **RAG检索系统**
-   - 文本向量化（使用text-embedding-3-small）
-   - Supabase RPC函数调用（match_chunks_for_user）
-   - 余弦相似度搜索
-   - 智能上下文构建
+   - 文本向量化（使用text-embedding-3-small，1536维度）
+   - vector(1536)类型存储（PostgreSQL pgvector）
+   - Python端余弦相似度计算
+   - 智能上下文构建和token控制
 
 2. **AI聊天接口**
    - 支持流式和非流式响应
@@ -36,17 +36,23 @@
 - `app/models/chat.py` - 聊天相关的Pydantic模型
 
 ### 2. 服务层
-- `app/services/rag_service.py` - RAG检索服务实现
+- `app/services/rag_service.py` - RAG检索服务实现（Python端相似度计算）
+- `app/services/insights_service.py` - 更新支持vector(1536)存储
 
 ### 3. 路由层
 - `app/routers/chat.py` - AI聊天API端点
 
-### 4. 文档
+### 4. 数据库迁移
+- `database/migrations/update_embedding_to_vector.sql` - vector(1536)迁移脚本
+
+### 5. 文档
 - `CHAT_API_GUIDE.md` - 详细的API使用指南
+- `VECTOR_MIGRATION_GUIDE.md` - vector迁移指南
 - `AI_CHAT_IMPLEMENTATION.md` - 实现总结（本文件）
 
-### 5. 测试
+### 6. 测试
 - `test_chat.py` - 功能测试脚本
+- `test_vector_storage.py` - vector存储测试脚本
 
 ## 🔧 修改的文件
 
@@ -97,7 +103,7 @@ GET /api/v1/chat/health
 
 ### 2. 自动RAG检索流程
 ```
-问题文本 → OpenAI Embedding → 向量化 → Supabase RPC → 相似度搜索 → 上下文构建
+问题文本 → OpenAI Embedding → 向量化 → 数据库查询 → Python相似度计算 → 上下文构建
 ```
 
 ### 3. AI生成流程
@@ -107,6 +113,8 @@ GET /api/v1/chat/health
 
 **特点**: 
 - RAG检索完全自动化
+- 使用vector(1536)高效存储和查询
+- Python端相似度计算，简单可靠
 - 所有参数由后端自动调节
 - 用户只需输入一句话即可获得基于文档库的智能回答
 
@@ -139,7 +147,8 @@ RATE_LIMIT_REQUESTS_PER_MINUTE=30
 
 ### 测试脚本
 ```bash
-python test_chat.py
+python test_chat.py          # 聊天功能测试
+python test_vector_storage.py # vector存储测试
 ```
 
 ### 测试覆盖
@@ -148,6 +157,8 @@ python test_chat.py
 - ✅ 流式聊天
 - ✅ 限流功能
 - ✅ 错误处理
+- ✅ vector(1536)存储和查询
+- ✅ RAG检索功能
 
 ## 📊 性能特性
 
@@ -202,6 +213,7 @@ python test_chat.py
 ## 🔮 扩展可能
 
 ### 1. 功能增强
+- HNSW索引优化（已支持）
 - MMR去冗余算法
 - 多轮对话记忆
 - 上下文扩展
@@ -255,7 +267,8 @@ print(result['data']['response'])
 AI聊天功能已完全实现，具备以下特点：
 
 - ✅ **功能完整**: RAG检索 + AI生成 + 流式响应
-- ✅ **性能优秀**: 异步处理 + 限流保护 + 错误处理
+- ✅ **性能优秀**: vector(1536)存储 + HNSW索引 + 异步处理
+- ✅ **架构简单**: Python端相似度计算 + 无RPC依赖
 - ✅ **易于使用**: 简单API + 详细文档 + 测试脚本
 - ✅ **可扩展**: 模块化设计 + 配置灵活 + 监控友好
 
@@ -264,3 +277,16 @@ AI聊天功能已完全实现，具备以下特点：
 ---
 
 📞 **技术支持**: 如有问题，请查看 `CHAT_API_GUIDE.md` 或运行 `test_chat.py` 进行诊断。
+
+## 🔄 最新更新
+
+### vector(1536) 迁移
+- ✅ 数据库支持 `vector(1536)` 类型存储
+- ✅ 移除RPC函数依赖，使用Python端相似度计算
+- ✅ 添加HNSW索引优化查询性能
+- ✅ 简化架构，提高可靠性
+
+### 迁移步骤
+1. 执行数据库迁移：`update_embedding_to_vector.sql`
+2. 验证功能：`python test_vector_storage.py`
+3. 开始使用：`POST /api/v1/chat`

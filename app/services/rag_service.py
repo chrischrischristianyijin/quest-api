@@ -112,19 +112,30 @@ class RAGService:
             chunks_with_scores = []
             for item in response.data:
                 if item['embedding']:
-                    # 计算余弦相似度
-                    similarity = self._calculate_cosine_similarity(query_embedding, item['embedding'])
-                    if similarity >= min_score:
-                        chunk = RAGChunk(
-                            id=item['id'],
-                            insight_id=item['insight_id'],
-                            chunk_index=item['chunk_index'],
-                            chunk_text=item['chunk_text'],
-                            chunk_size=item['chunk_size'],
-                            score=similarity,
-                            created_at=item['created_at']
-                        )
-                        chunks_with_scores.append(chunk)
+                    try:
+                        # 处理PostgreSQL vector(1536)类型数据
+                        embedding_data = self._normalize_embedding_data(item['embedding'], item['id'])
+                        
+                        if embedding_data is None:
+                            continue  # 跳过无效的embedding数据
+                        
+                        # 计算余弦相似度
+                        similarity = self._calculate_cosine_similarity(query_embedding, embedding_data)
+                        if similarity >= min_score:
+                            chunk = RAGChunk(
+                                id=item['id'],
+                                insight_id=item['insight_id'],
+                                chunk_index=item['chunk_index'],
+                                chunk_text=item['chunk_text'],
+                                chunk_size=item['chunk_size'],
+                                score=similarity,
+                                created_at=item['created_at']
+                            )
+                            chunks_with_scores.append(chunk)
+                            
+                    except Exception as e:
+                        logger.warning(f"处理embedding失败: {item['id']}, 错误: {e}")
+                        continue
             
             # 按相似度排序并取前k个
             chunks_with_scores.sort(key=lambda x: x.score, reverse=True)
@@ -137,14 +148,82 @@ class RAGService:
             logger.error(f"备用检索方法失败: {e}")
             raise
     
+    def _normalize_embedding_data(self, embedding_data: Any, chunk_id: str) -> Optional[List[float]]:
+        """标准化embedding数据，处理PostgreSQL vector(1536)类型"""
+        try:
+            # 如果已经是列表，直接检查
+            if isinstance(embedding_data, list):
+                if len(embedding_data) == self.embedding_dimensions:
+                    # 确保所有元素都是数值类型
+                    try:
+                        return [float(x) for x in embedding_data]
+                    except (ValueError, TypeError):
+                        logger.warning(f"embedding列表包含非数值元素: {chunk_id}")
+                        return None
+                else:
+                    logger.warning(f"embedding维度错误: {chunk_id}, 期望{self.embedding_dimensions}, 实际{len(embedding_data)}")
+                    return None
+            
+            # 如果是字符串，尝试解析
+            elif isinstance(embedding_data, str):
+                try:
+                    # 尝试解析为Python列表
+                    parsed_data = eval(embedding_data)
+                    if isinstance(parsed_data, list) and len(parsed_data) == self.embedding_dimensions:
+                        return [float(x) for x in parsed_data]
+                    else:
+                        logger.warning(f"解析的embedding格式错误: {chunk_id}")
+                        return None
+                except Exception as e:
+                    logger.warning(f"无法解析embedding字符串: {chunk_id}, 错误: {e}")
+                    return None
+            
+            # 如果是numpy数组
+            elif hasattr(embedding_data, 'tolist'):
+                try:
+                    data_list = embedding_data.tolist()
+                    if len(data_list) == self.embedding_dimensions:
+                        return [float(x) for x in data_list]
+                    else:
+                        logger.warning(f"numpy数组维度错误: {chunk_id}")
+                        return None
+                except Exception as e:
+                    logger.warning(f"转换numpy数组失败: {chunk_id}, 错误: {e}")
+                    return None
+            
+            # 如果是元组
+            elif isinstance(embedding_data, tuple):
+                if len(embedding_data) == self.embedding_dimensions:
+                    try:
+                        return [float(x) for x in embedding_data]
+                    except (ValueError, TypeError):
+                        logger.warning(f"embedding元组包含非数值元素: {chunk_id}")
+                        return None
+                else:
+                    logger.warning(f"embedding元组维度错误: {chunk_id}")
+                    return None
+            
+            else:
+                logger.warning(f"未知的embedding数据类型: {chunk_id}, 类型: {type(embedding_data)}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"标准化embedding数据失败: {chunk_id}, 错误: {e}")
+            return None
+
     def _calculate_cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
-        """计算余弦相似度"""
+        """计算余弦相似度（输入已通过_normalize_embedding_data标准化）"""
         try:
             import numpy as np
             
-            # 转换为numpy数组
-            a = np.array(vec1)
-            b = np.array(vec2)
+            # 转换为numpy数组，确保数据类型为float64
+            a = np.array(vec1, dtype=np.float64)
+            b = np.array(vec2, dtype=np.float64)
+            
+            # 检查维度是否匹配
+            if len(a) != len(b):
+                logger.warning(f"向量维度不匹配: {len(a)} vs {len(b)}")
+                return 0.0
             
             # 计算余弦相似度
             dot_product = np.dot(a, b)
