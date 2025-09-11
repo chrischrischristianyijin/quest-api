@@ -10,6 +10,8 @@
 - **类型提示**: 完整的Python类型注解
 - **Supabase集成**: 使用Supabase作为后端服务
 - **JWT认证**: 安全的JWT令牌认证机制
+- **AI聊天**: 基于RAG的智能问答系统
+- **流式响应**: 支持SSE流式聊天体验
 - **完全兼容**: 与原有Node.js版本API接口完全一致
 
 ## 🏗️ 项目结构
@@ -147,6 +149,11 @@ uvicorn main:app --host 0.0.0.0 --port 3001 --reload
 ### 元数据 (`/api/v1/metadata`)
 
 - `GET /` - 获取系统元数据
+
+### AI聊天 (`/api/v1/chat`)
+
+- `POST /chat` - AI聊天接口（支持RAG检索和流式响应）
+- `GET /chat/health` - 聊天服务健康检查
 
 ## 🌟 Python版本优势
 
