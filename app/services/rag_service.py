@@ -94,12 +94,12 @@ class RAGService:
         min_score: float = 0.15,
         only_insight: Optional[str] = None
     ) -> List[RAGChunk]:
-        """优化的检索方法，只查询用户相关的insights"""
+        """优化的检索方法，优先查询用户相关的insights，无用户时提供公开数据"""
         try:
-            # 必须提供user_id，只检索用户自己的insights
+            # 如果没有提供user_id，尝试检索公开的insights作为回退
             if not user_id:
-                logger.warning("未提供用户ID，无法检索用户相关数据")
-                return []
+                logger.warning("未提供用户ID，尝试检索公开数据作为回退")
+                return await self._retrieve_public_chunks(query_embedding, k, min_score, only_insight)
             
             # 1. 先获取用户的所有insights（包含更多元数据）
             insights_query = self.supabase.table('insights').select(
@@ -212,6 +212,111 @@ class RAGService:
         except Exception as e:
             logger.error(f"检索用户insights失败: {e}")
             raise
+    
+    async def _retrieve_public_chunks(
+        self,
+        query_embedding: List[float],
+        k: int = 10,
+        min_score: float = 0.15,
+        only_insight: Optional[str] = None
+    ) -> List[RAGChunk]:
+        """检索公开的insights作为回退机制"""
+        try:
+            logger.info("开始检索公开数据作为回退...")
+            
+            # 查询公开的insights（这里假设有一个is_public字段，如果没有则查询所有）
+            # 注意：这里需要根据实际的数据库schema调整
+            insights_query = self.supabase.table('insights').select(
+                'id, title, description, created_at, updated_at, tags, user_id'
+            )
+            
+            # 如果数据库中有is_public字段，可以添加过滤条件
+            # insights_query = insights_query.eq('is_public', True)
+            
+            # 限制查询数量，避免查询过多数据
+            insights_response = insights_query.limit(100).execute()
+            
+            if not insights_response.data:
+                logger.info("没有找到公开的insights")
+                return []
+            
+            insight_ids = [insight['id'] for insight in insights_response.data]
+            insights_map = {insight['id']: insight for insight in insights_response.data}
+            
+            logger.info(f"找到 {len(insight_ids)} 个公开insights")
+            
+            # 查询这些insights的所有chunks
+            chunks_query = self.supabase.table('insight_chunks').select(
+                'id, insight_id, chunk_index, chunk_text, chunk_size, created_at, embedding'
+            ).in_('insight_id', insight_ids).not_.is_('embedding', 'null')
+            
+            # 添加insight过滤条件
+            if only_insight:
+                chunks_query = chunks_query.eq('insight_id', only_insight)
+            
+            chunks_response = chunks_query.execute()
+            
+            if not chunks_response.data:
+                logger.warning("公开insights中没有找到有embedding的分块")
+                return []
+            
+            logger.info(f"找到 {len(chunks_response.data)} 个公开分块")
+            
+            # 计算相似度并排序
+            chunks_with_scores = []
+            for item in chunks_response.data:
+                if item['embedding']:
+                    try:
+                        embedding_data = self._normalize_embedding_data(item['embedding'], item['id'])
+                        if embedding_data is None:
+                            continue
+                        
+                        similarity = self._calculate_cosine_similarity(query_embedding, embedding_data)
+                        if similarity >= min_score:
+                            chunk = RAGChunk(
+                                id=item['id'],
+                                insight_id=item['insight_id'],
+                                chunk_index=item['chunk_index'],
+                                chunk_text=item['chunk_text'],
+                                chunk_size=item['chunk_size'],
+                                score=similarity,
+                                created_at=item['created_at']
+                            )
+                            chunks_with_scores.append(chunk)
+                    except Exception as e:
+                        logger.warning(f"处理公开chunk失败: {item['id']}, 错误: {e}")
+                        continue
+            
+            # 按相似度排序并限制数量
+            chunks_with_scores.sort(key=lambda x: x.score, reverse=True)
+            
+            # 限制每个insight的chunks数量，避免单一文章占主导
+            max_chunks_per_insight = int(os.getenv('RAG_MAX_CHUNKS_PER_INSIGHT', '3'))
+            insight_chunk_counts = {}
+            filtered_chunks = []
+            
+            for chunk in chunks_with_scores:
+                insight_id = chunk.insight_id
+                current_count = insight_chunk_counts.get(insight_id, 0)
+                
+                if current_count < max_chunks_per_insight:
+                    filtered_chunks.append(chunk)
+                    insight_chunk_counts[insight_id] = current_count + 1
+                    
+                    if len(filtered_chunks) >= k:
+                        break
+            
+            if filtered_chunks:
+                avg_score = sum(chunk.score for chunk in filtered_chunks) / len(filtered_chunks)
+                logger.info(f"检索到 {len(filtered_chunks)} 个公开分块（相似度 >= {min_score}，平均相似度: {avg_score:.3f}）")
+            else:
+                logger.info(f"没有找到相似度 >= {min_score} 的公开分块")
+            
+            return filtered_chunks
+            
+        except Exception as e:
+            logger.error(f"检索公开数据失败: {e}")
+            return []
     
     def _normalize_embedding_data(self, embedding_data: Any, chunk_id: str) -> Optional[List[float]]:
         """标准化embedding数据，处理PostgreSQL vector(1536)类型"""

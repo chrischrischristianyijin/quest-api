@@ -3,6 +3,7 @@ from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from app.models.chat import ChatRequest, ChatMessage, ChatError
 from app.services.rag_service import RAGService
+from app.services.auth_service import AuthService
 from app.utils.summarize import estimate_tokens
 from typing import Dict, Any, Optional, AsyncGenerator
 import os
@@ -72,9 +73,38 @@ async def chat_endpoint(request: Request, chat_request: ChatRequest):
             auth_header = request.headers.get("authorization")
             if auth_header and auth_header.startswith("Bearer "):
                 token = auth_header[7:]
-                if ':' in token:
+                
+                # 处理Google登录生成的临时token
+                if token.startswith("google_existing_user_"):
+                    # 格式: google_existing_user_{user_id}_{uuid}
+                    remaining = token[len("google_existing_user_"):]
+                    user_part_and_uuid = remaining.rsplit("_", 1)
+                    user_id = user_part_and_uuid[0] if len(user_part_and_uuid) >= 1 else remaining
+                elif token.startswith("google_new_user_"):
+                    # 格式: google_new_user_{user_id}_{uuid}
+                    remaining = token[len("google_new_user_"):]
+                    user_part_and_uuid = remaining.rsplit("_", 1)
+                    user_id = user_part_and_uuid[0] if len(user_part_and_uuid) >= 1 else remaining
+                elif token.startswith("google_auth_token_"):
+                    # 格式: google_auth_token_{user_id}_{uuid}
+                    remaining = token[len("google_auth_token_"):]
+                    user_part_and_uuid = remaining.rsplit("_", 1)
+                    user_id = user_part_and_uuid[0] if len(user_part_and_uuid) >= 1 else remaining
+                elif ':' in token:
+                    # 处理简单格式的token: user_id:token
                     user_id = token.split(':')[0]
-        except Exception:
+                else:
+                    # 尝试使用auth服务验证标准Supabase token
+                    try:
+                        auth_service = AuthService()
+                        user_info = await auth_service.get_current_user(token)
+                        user_id = user_info.get('id')
+                    except Exception:
+                        # 如果验证失败，继续使用None
+                        pass
+                        
+        except Exception as e:
+            logger.warning(f"用户身份验证失败: {e}")
             pass
         
         # 限流检查
