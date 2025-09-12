@@ -4,8 +4,6 @@ import logging
 import httpx
 import asyncio
 import numpy as np
-import time
-from typing import Dict, Tuple
 from app.core.database import get_supabase_service
 from app.models.chat import RAGChunk, RAGContext
 from app.utils.summarize import estimate_tokens
@@ -22,26 +20,6 @@ class RAGService:
         self.embedding_model = os.getenv('OPENAI_EMBEDDING_MODEL', 'text-embedding-3-small')
         self.embedding_dimensions = int(os.getenv('OPENAI_EMBEDDING_DIMENSIONS', '1536'))
         
-        # 简单的内存缓存
-        self._user_insights_cache: Dict[str, Tuple[List[str], float]] = {}
-        self._cache_ttl = 300  # 5分钟缓存
-    
-    def _get_cached_insights(self, user_id: str) -> Optional[List[str]]:
-        """获取缓存的用户insights"""
-        if user_id in self._user_insights_cache:
-            insight_ids, cache_time = self._user_insights_cache[user_id]
-            if time.time() - cache_time < self._cache_ttl:
-                logger.info(f"使用缓存的用户insights: {len(insight_ids)} 个")
-                return insight_ids
-            else:
-                # 缓存过期，删除
-                del self._user_insights_cache[user_id]
-        return None
-    
-    def _cache_insights(self, user_id: str, insight_ids: List[str]):
-        """缓存用户insights"""
-        self._user_insights_cache[user_id] = (insight_ids, time.time())
-        logger.info(f"缓存用户insights: {user_id}, {len(insight_ids)} 个")
         
     async def embed_text(self, text: str) -> List[float]:
         """将文本转换为向量嵌入"""
@@ -129,41 +107,20 @@ class RAGService:
             
             logger.info(f"使用HNSW向量搜索，用户: {user_id}")
             
-            # 构建HNSW向量搜索查询
-            # 使用PostgreSQL的向量操作符进行相似度搜索
-            if only_insight:
-                # 如果指定了特定的insight
-                chunks_query = self.supabase.table('insight_chunks').select(
-                    'id, insight_id, chunk_index, chunk_text, chunk_size, created_at, embedding'
-                ).eq('insight_id', only_insight).not_.is_('embedding', 'null')
-            else:
-                # 查询用户所有insights的chunks
-                chunks_query = self.supabase.table('insight_chunks').select(
-                    'id, insight_id, chunk_index, chunk_text, chunk_size, created_at, embedding'
-                ).not_.is_('embedding', 'null')
+            # 使用HNSW搜索函数
+            response = self.supabase.rpc('search_similar_chunks_by_text', {
+                'search_text': '',  # 这个函数需要文本参数，但我们主要用embedding
+                'user_id_param': user_id,
+                'similarity_threshold': min_score,
+                'max_results': k * 2  # 获取更多结果以便后续过滤
+            }).execute()
             
-            # 使用HNSW索引进行向量相似度搜索
-            # 使用正确的search_similar_chunks_by_text函数
-            try:
-                # 使用正确的HNSW搜索函数
-                response = self.supabase.rpc('search_similar_chunks_by_text', {
-                    'search_text': '',  # 这个函数需要文本参数，但我们主要用embedding
-                    'user_id_param': user_id,
-                    'similarity_threshold': min_score,
-                    'max_results': k * 2  # 获取更多结果以便后续过滤
-                }).execute()
-                
-                if response.data:
-                    logger.info(f"HNSW搜索找到 {len(response.data)} 个候选分块")
-                    return self._process_hnsw_results(response.data, k)
-                else:
-                    logger.info("HNSW搜索没有找到结果，回退到传统方法")
-                    return await self._fallback_retrieve_chunks_traditional(query_embedding, user_id, k, min_score, only_insight)
-                    
-            except Exception as hnsw_error:
-                logger.warning(f"HNSW搜索函数不可用: {hnsw_error}")
-                # 最后回退到传统方法
-                return await self._fallback_retrieve_chunks_traditional(query_embedding, user_id, k, min_score, only_insight)
+            if response.data:
+                logger.info(f"HNSW搜索找到 {len(response.data)} 个候选分块")
+                return self._process_hnsw_results(response.data, k)
+            else:
+                logger.info("HNSW搜索没有找到结果")
+                return []
             
         except Exception as e:
             logger.error(f"检索失败: {e}")
@@ -227,168 +184,6 @@ class RAGService:
             logger.error(f"处理HNSW结果失败: {e}")
             return []
     
-    async def _fallback_retrieve_chunks_traditional(
-        self, 
-        query_embedding: List[float], 
-        user_id: Optional[str] = None,
-        k: int = 10, 
-        min_score: float = 0.15,
-        only_insight: Optional[str] = None
-    ) -> List[RAGChunk]:
-        """传统检索方法（回退方案）"""
-        try:
-            # 必须提供user_id，只检索用户自己的insights
-            if not user_id:
-                logger.warning("未提供用户ID，无法检索用户相关数据")
-                return []
-            
-            # 1. 先获取用户的所有insights（使用缓存优化）
-            insight_ids = self._get_cached_insights(user_id)
-            
-            if insight_ids is None:
-                # 缓存未命中，查询数据库
-                insights_query = self.supabase.table('insights').select(
-                    'id, title, description, created_at, updated_at, tags'
-                ).eq('user_id', user_id)
-                
-                insights_response = insights_query.execute()
-                
-                if not insights_response.data:
-                    logger.info(f"用户 {user_id} 没有insights")
-                    return []
-                
-                insight_ids = [insight['id'] for insight in insights_response.data]
-                insights_map = {insight['id']: insight for insight in insights_response.data}
-                
-                # 缓存insights
-                self._cache_insights(user_id, insight_ids)
-                
-                logger.info(f"用户 {user_id} 有 {len(insight_ids)} 个insights")
-            else:
-                # 使用缓存，但仍需要获取insights元数据
-                insights_query = self.supabase.table('insights').select(
-                    'id, title, description, created_at, updated_at, tags'
-                ).eq('user_id', user_id)
-                
-                insights_response = insights_query.execute()
-                insights_map = {insight['id']: insight for insight in insights_response.data} if insights_response.data else {}
-            
-            # 2. 查询这些insights的所有chunks（优化查询）
-            # 只选择必要的字段，减少传输数据量
-            chunks_query = self.supabase.table('insight_chunks').select(
-                'id, insight_id, chunk_index, chunk_text, embedding'
-            ).in_('insight_id', insight_ids).not_.is_('embedding', 'null')
-            
-            # 添加insight过滤条件
-            if only_insight:
-                chunks_query = chunks_query.eq('insight_id', only_insight)
-            
-            # 限制查询数量，避免传输过多数据
-            max_chunks_per_query = int(os.getenv('RAG_MAX_CHUNKS_PER_QUERY', '500'))
-            chunks_query = chunks_query.limit(max_chunks_per_query)
-            
-            chunks_response = chunks_query.execute()
-            
-            if not chunks_response.data:
-                logger.warning(f"用户 {user_id} 的insights中没有找到有embedding的分块")
-                return []
-            
-            logger.info(f"找到 {len(chunks_response.data)} 个有embedding的分块")
-            
-            # 3. 优化相似度计算 - 使用numpy批量处理
-            chunks_with_scores = []
-            
-            # 预处理所有embedding数据
-            valid_items = []
-            valid_embeddings = []
-            
-            for item in chunks_response.data:
-                if item['embedding']:
-                    try:
-                        embedding_data = self._normalize_embedding_data(item['embedding'], item['id'])
-                        if embedding_data is not None:
-                            valid_items.append(item)
-                            valid_embeddings.append(embedding_data)
-                    except Exception as e:
-                        logger.warning(f"预处理embedding失败: {item['id']}, 错误: {e}")
-                        continue
-            
-            if not valid_embeddings:
-                logger.warning("没有有效的embedding数据")
-                return []
-            
-            # 批量计算相似度
-            query_vector = np.array(query_embedding, dtype=np.float64)
-            embeddings_matrix = np.array(valid_embeddings, dtype=np.float64)
-            
-            # 批量计算余弦相似度
-            similarities = self._batch_cosine_similarity(query_vector, embeddings_matrix)
-            
-            # 应用阈值并创建chunks
-            for i, similarity in enumerate(similarities):
-                if similarity >= min_score:
-                    item = valid_items[i]
-                    # 处理created_at字段，确保它是有效的日期时间
-                    created_at = item.get('created_at', '')
-                    if not created_at or created_at == '':
-                        from datetime import datetime
-                        created_at = datetime.utcnow().isoformat()
-                    
-                    chunk = RAGChunk(
-                        id=item['id'],
-                        insight_id=item['insight_id'],
-                        chunk_index=item['chunk_index'],
-                        chunk_text=item['chunk_text'],
-                        chunk_size=len(item['chunk_text']),  # 计算chunk_size
-                        score=similarity,
-                        created_at=created_at
-                    )
-                    chunks_with_scores.append(chunk)
-            
-            # 4. 按相似度排序并限制每个insight的chunks数量
-            chunks_with_scores.sort(key=lambda x: x.score, reverse=True)
-            
-            # 限制每个insight的chunks数量，避免单一文章占主导
-            max_chunks_per_insight = int(os.getenv('RAG_MAX_CHUNKS_PER_INSIGHT', '3'))
-            insight_chunk_counts = {}
-            filtered_chunks = []
-            
-            for chunk in chunks_with_scores:
-                insight_id = chunk.insight_id
-                current_count = insight_chunk_counts.get(insight_id, 0)
-                
-                if current_count < max_chunks_per_insight:
-                    filtered_chunks.append(chunk)
-                    insight_chunk_counts[insight_id] = current_count + 1
-                    
-                    # 如果已经达到总数量限制，停止
-                    if len(filtered_chunks) >= k:
-                        break
-            
-            top_chunks = filtered_chunks
-            
-            # 5. 记录检索统计信息
-            if top_chunks:
-                avg_score = sum(chunk.score for chunk in top_chunks) / len(top_chunks)
-                logger.info(f"传统方法检索到 {len(top_chunks)} 个相关分块（相似度 >= {min_score}，平均相似度: {avg_score:.3f}）")
-                
-                # 记录来源insights分布
-                source_insights = set(chunk.insight_id for chunk in top_chunks)
-                insight_distribution = {}
-                for chunk in top_chunks:
-                    insight_id = chunk.insight_id
-                    insight_distribution[insight_id] = insight_distribution.get(insight_id, 0) + 1
-                
-                logger.info(f"来源insights: {len(source_insights)} 个")
-                logger.info(f"每个insight的chunks分布: {dict(list(insight_distribution.items())[:5])}")
-            else:
-                logger.info(f"没有找到相似度 >= {min_score} 的分块")
-            
-            return top_chunks
-            
-        except Exception as e:
-            logger.error(f"传统检索方法失败: {e}")
-            raise
     
     def _normalize_embedding_data(self, embedding_data: Any, chunk_id: str) -> Optional[List[float]]:
         """标准化embedding数据，处理PostgreSQL vector(1536)类型"""
@@ -481,41 +276,6 @@ class RAGService:
             logger.error(f"计算余弦相似度失败: {e}")
             return 0.0
     
-    def _batch_cosine_similarity(self, query_vector: np.ndarray, embeddings_matrix: np.ndarray) -> np.ndarray:
-        """批量计算余弦相似度，提高性能"""
-        try:
-            # 确保输入是2D数组
-            if query_vector.ndim == 1:
-                query_vector = query_vector.reshape(1, -1)
-            
-            # 计算点积
-            dot_products = np.dot(embeddings_matrix, query_vector.T).flatten()
-            
-            # 计算范数
-            query_norm = np.linalg.norm(query_vector)
-            embedding_norms = np.linalg.norm(embeddings_matrix, axis=1)
-            
-            # 避免除零
-            valid_indices = (query_norm > 0) & (embedding_norms > 0)
-            
-            # 计算相似度
-            similarities = np.zeros(len(embeddings_matrix))
-            similarities[valid_indices] = dot_products[valid_indices] / (query_norm * embedding_norms[valid_indices])
-            
-            return similarities
-            
-        except Exception as e:
-            logger.error(f"批量计算余弦相似度失败: {e}")
-            # 回退到逐个计算
-            similarities = []
-            for i, embedding in enumerate(embeddings_matrix):
-                try:
-                    sim = self._calculate_cosine_similarity(query_vector.flatten().tolist(), embedding.tolist())
-                    similarities.append(sim)
-                except Exception as sim_error:
-                    logger.warning(f"计算第{i}个相似度失败: {sim_error}")
-                    similarities.append(0.0)
-            return np.array(similarities)
     
     
     def format_context(self, chunks: List[RAGChunk], max_tokens: int = 4000) -> RAGContext:
