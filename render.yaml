@@ -114,6 +114,8 @@ services:
         value: true
       - key: OPENAI_API_KEY
         value: your_openai_api_key
+      - key: OPENAI_BASE_URL
+        value: https://api.openai.com/v1
       - key: OPENAI_EMBEDDING_MODEL
         value: text-embedding-3-small
       - key: OPENAI_EMBEDDING_DIMENSIONS
@@ -123,6 +125,27 @@ services:
       - key: OPENAI_EMBEDDING_MAX_RETRIES
         value: 3
       - key: OPENAI_EMBEDDING_TIMEOUT
+        value: 30
+      # AI聊天配置
+      - key: CHAT_MODEL
+        value: gpt-4o-mini
+      - key: CHAT_MAX_TOKENS
+        value: 2000
+      - key: CHAT_TEMPERATURE
+        value: 0.3
+      - key: CHAT_DEFAULT_STREAM
+        value: true
+      # RAG配置
+      - key: RAG_ENABLED
+        value: true
+      - key: RAG_DEFAULT_K
+        value: 6
+      - key: RAG_DEFAULT_MIN_SCORE
+        value: 0.2
+      - key: RAG_MAX_CONTEXT_TOKENS
+        value: 2000
+      # 限流配置
+      - key: RATE_LIMIT_REQUESTS_PER_MINUTE
         value: 30
       # 性能优化配置
       - key: MAX_INSIGHTS_LIMIT

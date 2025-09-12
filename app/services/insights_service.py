@@ -948,12 +948,20 @@ async def _save_insight_chunks(insight_id: UUID, text: str, refine_report: Dict[
             # 添加 embedding 数据（如果可用）
             if i < len(chunk_embeddings) and chunk_embeddings[i]:
                 embedding_data = chunk_embeddings[i]
-                chunk_item.update({
-                    'embedding': embedding_data.get('embedding'),
-                    'embedding_model': embedding_data.get('model'),
-                    'embedding_tokens': embedding_data.get('tokens_used', 0),
-                    'embedding_generated_at': embedding_data.get('generated_at')
-                })
+                embedding_vector = embedding_data.get('embedding')
+                
+                # 确保embedding以vector(1536)格式存储
+                if embedding_vector and len(embedding_vector) == 1536:
+                    # 将embedding转换为PostgreSQL vector格式
+                    # Supabase Python客户端会自动处理vector类型转换
+                    chunk_item.update({
+                        'embedding': embedding_vector,  # 直接传递列表，Supabase会转换为vector(1536)
+                        'embedding_model': embedding_data.get('model'),
+                        'embedding_tokens': embedding_data.get('tokens_used', 0),
+                        'embedding_generated_at': embedding_data.get('generated_at')
+                    })
+                else:
+                    logger.warning(f"[分块保存] embedding维度不正确: {len(embedding_vector) if embedding_vector else 0}, 期望1536")
             
             chunk_data.append(chunk_item)
         

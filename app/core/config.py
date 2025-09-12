@@ -45,6 +45,28 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_SECRET: str = ""
     GOOGLE_REDIRECT_URI: str = ""
     
+    # OpenAI 配置
+    OPENAI_API_KEY: str = ""
+    OPENAI_BASE_URL: str = "https://api.openai.com/v1"
+    OPENAI_ORGANIZATION: str = ""
+    OPENAI_PROJECT: str = ""
+    
+    # AI聊天配置
+    CHAT_MODEL: str = "gpt-4o-mini"
+    CHAT_MAX_TOKENS: int = 4000  # 增加输出token限制
+    CHAT_TEMPERATURE: float = 0.3
+    CHAT_DEFAULT_STREAM: bool = True
+    
+    # RAG配置
+    RAG_ENABLED: bool = True
+    RAG_DEFAULT_K: int = 10  # 增加检索数量
+    RAG_DEFAULT_MIN_SCORE: float = 0.15  # 降低相似度阈值
+    RAG_MAX_CONTEXT_TOKENS: int = 4000  # 增加上下文token限制
+    RAG_MAX_CHUNKS_PER_INSIGHT: int = 3  # 每个insight最多检索的chunks数量
+    
+    # 限流配置
+    RATE_LIMIT_REQUESTS_PER_MINUTE: int = 30
+    
     class Config:
         env_file = ".env"
         case_sensitive = True
