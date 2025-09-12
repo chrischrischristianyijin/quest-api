@@ -19,7 +19,7 @@ class RAGService:
         self.openai_base_url = os.getenv('OPENAI_BASE_URL', 'https://api.openai.com/v1')
         self.embedding_model = os.getenv('OPENAI_EMBEDDING_MODEL', 'text-embedding-3-small')
         self.embedding_dimensions = int(os.getenv('OPENAI_EMBEDDING_DIMENSIONS', '1536'))
-        self.chat_model = os.getenv('CHAT_MODEL', 'gpt-5-mini')
+        self.chat_model = os.getenv('CHAT_MODEL', 'gpt-4o-mini')
         
         
     async def extract_keywords(self, query: str) -> str:
@@ -45,16 +45,29 @@ class RAGService:
                 "Keywords:"
             )
             
-            payload = {
-                'model': self.chat_model,
-                'messages': [
-                    {"role": "user", "content": keyword_prompt}
-                ],
-                'temperature': 0.1,  # 低温度确保一致性
-                'max_completion_tokens': 100,  # GPT-5 mini 使用 max_completion_tokens
-                'verbosity': 'low',  # 简短回答
-                'reasoning_effort': 'minimal'  # 快速推理
-            }
+            # 根据模型类型设置不同的参数
+            if 'gpt-5' in self.chat_model.lower():
+                # GPT-5 mini 特殊参数
+                payload = {
+                    'model': self.chat_model,
+                    'messages': [
+                        {"role": "user", "content": keyword_prompt}
+                    ],
+                    'temperature': 0.1,
+                    'max_completion_tokens': 100,  # GPT-5 mini 使用 max_completion_tokens
+                    'verbosity': 'low',  # 简短回答
+                    'reasoning_effort': 'minimal'  # 快速推理
+                }
+            else:
+                # 标准 GPT 模型参数
+                payload = {
+                    'model': self.chat_model,
+                    'messages': [
+                        {"role": "user", "content": keyword_prompt}
+                    ],
+                    'temperature': 0.1,
+                    'max_tokens': 100
+                }
             
             async with httpx.AsyncClient(timeout=15.0) as client:
                 response = await client.post(
@@ -72,13 +85,6 @@ class RAGService:
                 
         except Exception as e:
             logger.warning(f"关键词提取失败，使用原始问题: {e}")
-            # 如果是HTTP错误，记录更多详情
-            if hasattr(e, 'response') and e.response is not None:
-                try:
-                    error_detail = e.response.json()
-                    logger.warning(f"API错误详情: {error_detail}")
-                except:
-                    logger.warning(f"API响应状态: {e.response.status_code}")
             return query  # 失败时返回原始问题
         
     async def embed_text(self, text: str) -> List[float]:
@@ -167,20 +173,41 @@ class RAGService:
             
             logger.info(f"使用HNSW向量搜索，用户: {user_id}")
             
-            # 使用HNSW搜索函数
-            response = self.supabase.rpc('search_similar_chunks_by_text', {
-                'search_text': '',  # 这个函数需要文本参数，但我们主要用embedding
-                'user_id_param': user_id,
-                'similarity_threshold': min_score,
-                'max_results': k * 5  # 获取更多结果以便后续过滤
-            }).execute()
+            # 尝试使用基于向量的HNSW搜索函数
+            try:
+                # 方法1: 尝试使用专门的向量搜索函数
+                response = self.supabase.rpc('search_similar_chunks', {
+                    'query_embedding': query_vector_str,
+                    'user_id_param': user_id,
+                    'similarity_threshold': min_score,
+                    'max_results': k * 5
+                }).execute()
+                
+                if response.data:
+                    logger.info(f"HNSW向量搜索找到 {len(response.data)} 个候选分块")
+                    return self._process_hnsw_results(response.data, k)
+                    
+            except Exception as vector_error:
+                logger.warning(f"向量搜索函数失败: {vector_error}")
+                
+                # 方法2: 回退到文本搜索（使用关键词）
+                try:
+                    response = self.supabase.rpc('search_similar_chunks_by_text', {
+                        'search_text': query_text,  # 使用原始查询文本
+                        'user_id_param': user_id,
+                        'similarity_threshold': min_score,
+                        'max_results': k * 5
+                    }).execute()
+                    
+                    if response.data:
+                        logger.info(f"文本搜索找到 {len(response.data)} 个候选分块")
+                        return self._process_hnsw_results(response.data, k)
+                        
+                except Exception as text_error:
+                    logger.warning(f"文本搜索也失败: {text_error}")
             
-            if response.data:
-                logger.info(f"HNSW搜索找到 {len(response.data)} 个候选分块")
-                return self._process_hnsw_results(response.data, k)
-            else:
-                logger.info("HNSW搜索没有找到结果")
-                return []
+            logger.info("所有搜索方法都没有找到结果")
+            return []
             
         except Exception as e:
             logger.error(f"检索失败: {e}")
