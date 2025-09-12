@@ -51,7 +51,9 @@ class RAGService:
                     {"role": "user", "content": keyword_prompt}
                 ],
                 'temperature': 0.1,  # 低温度确保一致性
-                'max_tokens': 100  # 关键词提取只需要很少的token
+                'max_completion_tokens': 100,  # GPT-5 mini 使用 max_completion_tokens
+                'verbosity': 'low',  # 简短回答
+                'reasoning_effort': 'minimal'  # 快速推理
             }
             
             async with httpx.AsyncClient(timeout=15.0) as client:
@@ -70,6 +72,13 @@ class RAGService:
                 
         except Exception as e:
             logger.warning(f"关键词提取失败，使用原始问题: {e}")
+            # 如果是HTTP错误，记录更多详情
+            if hasattr(e, 'response') and e.response is not None:
+                try:
+                    error_detail = e.response.json()
+                    logger.warning(f"API错误详情: {error_detail}")
+                except:
+                    logger.warning(f"API响应状态: {e.response.status_code}")
             return query  # 失败时返回原始问题
         
     async def embed_text(self, text: str) -> List[float]:
