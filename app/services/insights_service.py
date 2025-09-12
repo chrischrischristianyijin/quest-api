@@ -79,9 +79,9 @@ class InsightsService:
             
             logger.info(f"查询用户 {query_user_id} 的insights，当前用户: {user_id}, stack_id: {stack_id}")
             
-            # 构建查询 - 包含JSONB tags字段和stack_id，实现零JOIN查询
+            # 构建查询 - 包含JSONB tags字段和stack_id，以及summary字段
             query = supabase.table('insights').select(
-                'id, title, description, url, image_url, created_at, updated_at, tags, stack_id'
+                'id, title, description, url, image_url, created_at, updated_at, tags, stack_id, insight_contents(summary, thought)'
             ).eq('user_id', query_user_id)
             
             # 添加stack_id筛选条件
@@ -185,9 +185,9 @@ class InsightsService:
             
             logger.info(f"查询用户 {query_user_id} 的所有insights，当前用户: {user_id}")
             
-            # 构建查询 - 包含JSONB tags字段和stack_id，实现零JOIN查询
+            # 构建查询 - 包含JSONB tags字段和stack_id，以及summary字段
             query = supabase.table('insights').select(
-                'id, title, description, url, image_url, created_at, updated_at, tags, stack_id'
+                'id, title, description, url, image_url, created_at, updated_at, tags, stack_id, insight_contents(summary, thought)'
             ).eq('user_id', query_user_id)
             
             # 添加搜索条件
@@ -267,9 +267,9 @@ class InsightsService:
             
             logger.info(f"增量查询用户 {user_id} 的insights，since={since}, etag={etag}")
             
-            # 构建基础查询 - 包含JSONB tags字段，实现零JOIN查询
+            # 构建基础查询 - 包含JSONB tags字段，以及summary字段
             query = supabase.table('insights').select(
-                'id, title, description, url, image_url, created_at, updated_at, tags'
+                'id, title, description, url, image_url, created_at, updated_at, tags, insight_contents(summary, thought)'
             ).eq('user_id', str(user_id))
             
             # 时间过滤：只获取指定时间之后的数据

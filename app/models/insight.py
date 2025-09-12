@@ -10,6 +10,7 @@ class InsightBase(BaseModel):
     url: Optional[str] = Field(None, max_length=500, description="相关链接")
     image_url: Optional[str] = Field(None, max_length=500, description="图片地址")
     thought: Optional[str] = Field(None, max_length=2000, description="用户的想法/备注")
+    summary: Optional[str] = Field(None, description="AI生成的摘要")
     meta: Optional[Dict[str, Any]] = Field(None, description="网页元数据（OG/Twitter/JSON-LD等提取结果）")
 
 class InsightCreate(InsightBase):
