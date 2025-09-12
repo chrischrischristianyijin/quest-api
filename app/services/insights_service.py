@@ -56,7 +56,9 @@ class InsightsService:
         page: int = 1,
         limit: int = 10,
         search: Optional[str] = None,
-        target_user_id: Optional[UUID] = None
+        target_user_id: Optional[UUID] = None,
+        stack_id: Optional[int] = None,
+        include_tags: bool = False
     ) -> Dict[str, Any]:
         """获取insights列表（分页）"""
         try:
@@ -75,12 +77,17 @@ class InsightsService:
                     "message": "只能查看自己的insights"
                 }
             
-            logger.info(f"查询用户 {query_user_id} 的insights，当前用户: {user_id}")
+            logger.info(f"查询用户 {query_user_id} 的insights，当前用户: {user_id}, stack_id: {stack_id}")
             
             # 构建查询 - 包含JSONB tags字段和stack_id，实现零JOIN查询
             query = supabase.table('insights').select(
                 'id, title, description, url, image_url, created_at, updated_at, tags, stack_id'
             ).eq('user_id', query_user_id)
+            
+            # 添加stack_id筛选条件
+            if stack_id is not None:
+                query = query.eq('stack_id', stack_id)
+                logger.info(f"🔍 添加stack_id筛选: {stack_id}")
             
             # 添加搜索条件
             if search:
@@ -101,6 +108,8 @@ class InsightsService:
             
             # 获取总数
             count_query = supabase.table('insights').select('id', count='exact').eq('user_id', query_user_id)
+            if stack_id is not None:
+                count_query = count_query.eq('stack_id', stack_id)
             if search:
                 count_query = count_query.or_(f'title.ilike.%{search}%,description.ilike.%{search}%')
             
@@ -229,6 +238,7 @@ class InsightsService:
                     "image_url": insight.get('image_url'),
                     "created_at": insight['created_at'],
                     "updated_at": insight['updated_at'],
+                    "stack_id": insight.get('stack_id'),  # 包含stack_id字段
                     "tags": insight_tags  # 🚀 零延迟标签数据！
                 }
                 insight_responses.append(insight_response)
@@ -408,9 +418,25 @@ class InsightsService:
                 'url': insight_data.url,
                 'image_url': insight_data.image_url,
                 'user_id': str(user_id),
-                'tags': []  # 新的JSONB字段，初始为空数组
+                'tags': [],  # 新的JSONB字段，初始为空数组
+                'stack_id': insight_data.stack_id  # 添加stack_id支持
                 # 注意：thought字段已迁移到insight_contents表
             }
+            
+            # 调试日志
+            logger.info(f"🔍 DEBUG: 准备插入insight数据: stack_id={insight_data.stack_id}, type={type(insight_data.stack_id)}")
+            logger.info(f"🔍 DEBUG: 完整insight_insert_data: {insight_insert_data}")
+            
+            # 确保stack_id被包含在插入数据中，即使为None
+            if 'stack_id' not in insight_insert_data:
+                insight_insert_data['stack_id'] = insight_data.stack_id
+                logger.info(f"🔍 DEBUG: 手动添加stack_id到插入数据: {insight_insert_data['stack_id']}")
+            
+            # 验证stack_id字段
+            if insight_insert_data.get('stack_id') is not None:
+                logger.info(f"🔍 DEBUG: stack_id将被插入: {insight_insert_data['stack_id']} (type: {type(insight_insert_data['stack_id'])})")
+            else:
+                logger.warning(f"🔍 DEBUG: stack_id为None，将插入NULL值")
 
             # 可选写入 meta（如列存在），以 JSON 形式存储网页元数据
             try:
@@ -420,7 +446,8 @@ class InsightsService:
                 pass
             
             # 创建insight（使用 service role 以避免 RLS 造成的插入失败）
-            logger.info(f"准备创建 insight：user_id={user_id}, url={insight_data.url}")
+            logger.info(f"🔍 DEBUG: 准备创建 insight：user_id={user_id}, url={insight_data.url}")
+            logger.info(f"🔍 DEBUG: 最终插入数据: {insight_insert_data}")
             response = supabase_service.table('insights').insert(insight_insert_data).execute()
             
             if hasattr(response, 'error') and response.error:
@@ -431,7 +458,9 @@ class InsightsService:
                 return {"success": False, "message": "创建insight失败"}
             
             insight = response.data[0]
-            logger.info(f"insight 创建成功: id={insight.get('id')}, user_id={insight.get('user_id')}")
+            logger.info(f"🔍 DEBUG: insight 创建成功: id={insight.get('id')}, user_id={insight.get('user_id')}")
+            logger.info(f"🔍 DEBUG: 创建的insight数据: {insight}")
+            logger.info(f"🔍 DEBUG: 创建的insight stack_id: {insight.get('stack_id')} (type: {type(insight.get('stack_id'))})")
             insight_id = UUID(insight['id'])
 
             # 启动异步后台任务处理内容抓取和摘要生成
@@ -477,6 +506,7 @@ class InsightsService:
                             "description": insight_data.description,
                             "url": insight_data.url,
                             "image_url": insight_data.image_url,
+                            "stack_id": insight_data.stack_id,
                             "tags": []
                         }
                     }
@@ -498,6 +528,7 @@ class InsightsService:
                         "description": insight_detail['description'],
                         "url": insight_detail.get('url'),
                         "image_url": insight_detail.get('image_url'),
+                        "stack_id": insight_detail.get('stack_id'),
                         "meta": insight_detail.get('meta'),
                         "created_at": insight_detail['created_at'],
                         "updated_at": insight_detail['updated_at'],

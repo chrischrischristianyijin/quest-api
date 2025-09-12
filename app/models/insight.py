@@ -16,6 +16,7 @@ class InsightCreate(InsightBase):
     """创建Insight的请求模型"""
     url: str = Field(..., max_length=500, description="相关链接（必需）")
     tag_ids: Optional[List[UUID]] = Field(None, description="标签ID列表，直接关联现有标签")
+    stack_id: Optional[UUID] = Field(None, description="关联的堆叠ID")
 
 class InsightCreateFromURL(BaseModel):
     """从URL创建Insight的请求模型（前端发送）"""
@@ -23,6 +24,7 @@ class InsightCreateFromURL(BaseModel):
     title: Optional[str] = Field(None, min_length=1, max_length=200, description="用户自定义标题（可选）")
     thought: Optional[str] = Field(None, max_length=2000, description="用户的想法/备注")
     tag_ids: Optional[List[UUID]] = Field(None, description="标签ID列表，直接关联现有标签")
+    stack_id: Optional[UUID] = Field(None, description="关联的堆叠ID")
 
 class InsightUpdate(BaseModel):
     """更新Insight的请求模型"""
@@ -32,13 +34,13 @@ class InsightUpdate(BaseModel):
     image_url: Optional[str] = Field(None, max_length=500, description="图片地址")
     thought: Optional[str] = Field(None, max_length=2000, description="用户的想法/备注")
     tag_ids: Optional[List[UUID]] = Field(None, description="标签ID列表，会替换现有标签")
-    stack_id: Optional[int] = Field(None, description="关联的堆叠ID，设置为null可移除堆叠关联")
+    stack_id: Optional[UUID] = Field(None, description="关联的堆叠ID，设置为null可移除堆叠关联")
 
 class InsightResponse(InsightBase):
     """Insight响应模型"""
     id: UUID
     user_id: UUID
-    stack_id: Optional[int] = Field(None, description="关联的堆叠ID")
+    stack_id: Optional[UUID] = Field(None, description="关联的堆叠ID")
     created_at: datetime
     updated_at: datetime
     tags: List[dict] = Field(default_factory=list, description="标签信息列表")

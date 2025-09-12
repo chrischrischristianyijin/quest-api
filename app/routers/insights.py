@@ -20,6 +20,8 @@ async def get_insights(
     limit: int = Query(10, ge=1, le=100, description="每页数量"),
     user_id: Optional[UUID] = Query(None, description="用户ID筛选"),
     search: Optional[str] = Query(None, description="搜索关键词"),
+    stack_id: Optional[int] = Query(None, description="堆叠ID筛选"),
+    include_tags: bool = Query(False, description="是否包含标签信息"),
     credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
     """获取见解列表（分页）"""
@@ -27,7 +29,7 @@ async def get_insights(
         auth_service = AuthService()
         current_user = await auth_service.get_current_user(credentials.credentials)
         
-        logger.info(f"用户 {current_user['id']} 请求insights列表，page={page}, limit={limit}, search={search}, user_id={user_id}")
+        logger.info(f"用户 {current_user['id']} 请求insights列表，page={page}, limit={limit}, search={search}, user_id={user_id}, stack_id={stack_id}")
         
         insights_service = InsightsService()
         result = await insights_service.get_insights(
@@ -35,7 +37,9 @@ async def get_insights(
             page=page,
             limit=limit,
             search=search,
-            target_user_id=user_id
+            target_user_id=user_id,
+            stack_id=stack_id,
+            include_tags=include_tags
         )
         
         if not result.get("success"):
@@ -187,8 +191,15 @@ async def create_insight(
             url=insight.url,
             image_url=metadata.get("image_url"),
             thought=insight.thought,
-            tag_ids=insight.tag_ids
+            tag_ids=insight.tag_ids,
+            stack_id=insight.stack_id
         )
+        
+        # 调试日志
+        logger.info(f"🔍 DEBUG: 从URL创建insight: stack_id={insight.stack_id}, type={type(insight.stack_id)}")
+        logger.info(f"🔍 DEBUG: 创建的insight_data: stack_id={insight_data.stack_id}, type={type(insight_data.stack_id)}")
+        logger.info(f"🔍 DEBUG: 完整insight对象: {insight}")
+        logger.info(f"🔍 DEBUG: 完整insight_data对象: {insight_data}")
 
         # 将提取到的完整 metadata 附带在请求生命周期中，通过服务层落库（若列存在）
         # 动态附加，避免修改 Pydantic 入参模型
@@ -207,6 +218,48 @@ async def create_insight(
         return result
     except Exception as e:
         logger.error(f"创建见解失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/debug/stack-ids")
+async def debug_stack_ids(
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """调试端点：检查数据库中的stack_id状态"""
+    try:
+        auth_service = AuthService()
+        current_user = await auth_service.get_current_user(credentials.credentials)
+        
+        from app.core.database import get_supabase_service
+        supabase_service = get_supabase_service()
+        
+        # 查询最近的insights
+        response = supabase_service.table('insights').select('id, title, stack_id, created_at').order('created_at', desc=True).limit(10).execute()
+        
+        insights = response.data or []
+        logger.info(f"🔍 DEBUG: 最近10个insights的stack_id状态:")
+        
+        for insight in insights:
+            logger.info(f"🔍 DEBUG: Insight {insight['id']}: title='{insight['title']}', stack_id={insight['stack_id']}, type={type(insight['stack_id'])}")
+        
+        # 查询所有stacks
+        stacks_response = supabase_service.table('stacks').select('id, name').execute()
+        stacks = stacks_response.data or []
+        logger.info(f"🔍 DEBUG: 所有stacks:")
+        
+        for stack in stacks:
+            logger.info(f"🔍 DEBUG: Stack {stack['id']}: name='{stack['name']}'")
+        
+        return {
+            "success": True,
+            "message": "Debug information logged",
+            "data": {
+                "insights": insights,
+                "stacks": stacks
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"调试查询失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.put("/{insight_id}")
