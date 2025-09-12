@@ -133,20 +133,8 @@ class RAGService:
     ) -> List[RAGChunk]:
         """检索相关分块 - 支持多种检索策略"""
         try:
-            # 策略1: 基础检索（只查询用户insights）
+            # 基础检索（只查询用户insights）
             chunks = await self._fallback_retrieve_chunks(query_embedding, user_id, k, min_score, only_insight, query_text)
-            
-            # 如果结果不足，尝试策略2: 降低阈值重新检索
-            if len(chunks) < k and min_score > 0.1:
-                logger.info(f"结果不足({len(chunks)}/{k})，降低阈值重新检索")
-                chunks = await self._fallback_retrieve_chunks(query_embedding, user_id, k, 0.1, only_insight, query_text)
-            
-            # 策略3: 如果仍然不足，尝试增加k值
-            if len(chunks) < k:
-                logger.info(f"结果仍然不足({len(chunks)}/{k})，增加检索数量")
-                chunks = await self._fallback_retrieve_chunks(query_embedding, user_id, k * 2, 0.05, only_insight, query_text)
-                # 只取前k个
-                chunks = chunks[:k]
             
             return chunks
             
