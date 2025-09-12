@@ -127,7 +127,7 @@ class RAGService:
         query_embedding: List[float], 
         user_id: Optional[str] = None,
         k: int = 10, 
-        min_score: float = 0.15,
+        min_score: float = 0.25,
         only_insight: Optional[str] = None,
         query_text: str = ""
     ) -> List[RAGChunk]:
@@ -147,7 +147,7 @@ class RAGService:
         query_embedding: List[float], 
         user_id: Optional[str] = None,
         k: int = 10, 
-        min_score: float = 0.15,
+        min_score: float = 0.25,
         only_insight: Optional[str] = None,
         query_text: str = ""
     ) -> List[RAGChunk]:
@@ -249,100 +249,6 @@ class RAGService:
             logger.error(f"处理HNSW结果失败: {e}")
             return []
     
-    
-    def _normalize_embedding_data(self, embedding_data: Any, chunk_id: str) -> Optional[List[float]]:
-        """标准化embedding数据，处理PostgreSQL vector(1536)类型"""
-        try:
-            # 如果已经是列表，直接检查
-            if isinstance(embedding_data, list):
-                if len(embedding_data) == self.embedding_dimensions:
-                    # 确保所有元素都是数值类型
-                    try:
-                        return [float(x) for x in embedding_data]
-                    except (ValueError, TypeError):
-                        logger.warning(f"embedding列表包含非数值元素: {chunk_id}")
-                        return None
-                else:
-                    logger.warning(f"embedding维度错误: {chunk_id}, 期望{self.embedding_dimensions}, 实际{len(embedding_data)}")
-                    return None
-            
-            # 如果是字符串，尝试解析
-            elif isinstance(embedding_data, str):
-                try:
-                    # 尝试解析为Python列表
-                    parsed_data = eval(embedding_data)
-                    if isinstance(parsed_data, list) and len(parsed_data) == self.embedding_dimensions:
-                        return [float(x) for x in parsed_data]
-                    else:
-                        logger.warning(f"解析的embedding格式错误: {chunk_id}")
-                        return None
-                except Exception as e:
-                    logger.warning(f"无法解析embedding字符串: {chunk_id}, 错误: {e}")
-                    return None
-            
-            # 如果是numpy数组
-            elif hasattr(embedding_data, 'tolist'):
-                try:
-                    data_list = embedding_data.tolist()
-                    if len(data_list) == self.embedding_dimensions:
-                        return [float(x) for x in data_list]
-                    else:
-                        logger.warning(f"numpy数组维度错误: {chunk_id}")
-                        return None
-                except Exception as e:
-                    logger.warning(f"转换numpy数组失败: {chunk_id}, 错误: {e}")
-                    return None
-            
-            # 如果是元组
-            elif isinstance(embedding_data, tuple):
-                if len(embedding_data) == self.embedding_dimensions:
-                    try:
-                        return [float(x) for x in embedding_data]
-                    except (ValueError, TypeError):
-                        logger.warning(f"embedding元组包含非数值元素: {chunk_id}")
-                        return None
-                else:
-                    logger.warning(f"embedding元组维度错误: {chunk_id}")
-                    return None
-            
-            else:
-                logger.warning(f"未知的embedding数据类型: {chunk_id}, 类型: {type(embedding_data)}")
-                return None
-                
-        except Exception as e:
-            logger.error(f"标准化embedding数据失败: {chunk_id}, 错误: {e}")
-            return None
-
-    def _calculate_cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
-        """计算余弦相似度（输入已通过_normalize_embedding_data标准化）"""
-        try:
-            
-            # 转换为numpy数组，确保数据类型为float64
-            a = np.array(vec1, dtype=np.float64)
-            b = np.array(vec2, dtype=np.float64)
-            
-            # 检查维度是否匹配
-            if len(a) != len(b):
-                logger.warning(f"向量维度不匹配: {len(a)} vs {len(b)}")
-                return 0.0
-            
-            # 计算余弦相似度
-            dot_product = np.dot(a, b)
-            norm_a = np.linalg.norm(a)
-            norm_b = np.linalg.norm(b)
-            
-            if norm_a == 0 or norm_b == 0:
-                return 0.0
-            
-            similarity = dot_product / (norm_a * norm_b)
-            return float(similarity)
-            
-        except Exception as e:
-            logger.error(f"计算余弦相似度失败: {e}")
-            return 0.0
-    
-    
-    
     def format_context(self, chunks: List[RAGChunk], max_tokens: int = 4000) -> RAGContext:
         """格式化检索到的分块为上下文"""
         try:
@@ -392,7 +298,7 @@ class RAGService:
         query: str, 
         user_id: Optional[str] = None,
         k: int = 10, 
-        min_score: float = 0.15,
+        min_score: float = 0.25,
         max_context_tokens: int = 4000
     ) -> RAGContext:
         """完整的RAG检索流程 - 支持个性化检索"""
@@ -431,9 +337,9 @@ class RAGService:
         k: int = 10,
         min_score: float = 0.15
     ) -> List[RAGChunk]:
-        """个性化检索策略"""
+        """简化的个性化检索策略"""
         try:
-            # 基础检索
+            # 直接进行基础检索
             chunks = await self.retrieve_chunks(
                 query_embedding=query_embedding,
                 user_id=user_id,
@@ -442,46 +348,29 @@ class RAGService:
                 query_text=query_text
             )
             
-            # 如果用户有insights，尝试获取更多上下文
-            if user_id and chunks:
-                # 获取相关insights的更多chunks
-                insight_ids = list(set(chunk.insight_id for chunk in chunks))
-                if len(insight_ids) > 0:
-                    # 为每个相关insight获取更多chunks
-                    additional_chunks = await self._get_additional_chunks(
-                        query_embedding, insight_ids, user_id, k // 2, min_score * 0.8
-                    )
+            # 简单的去重和排序
+            if chunks:
+                # 按相似度排序
+                chunks.sort(key=lambda x: x.score, reverse=True)
+                
+                # 限制每个insight的chunks数量（简化版）
+                max_chunks_per_insight = int(os.getenv('RAG_MAX_CHUNKS_PER_INSIGHT', '3'))
+                insight_chunk_counts = {}
+                filtered_chunks = []
+                
+                for chunk in chunks:
+                    insight_id = chunk.insight_id
+                    current_count = insight_chunk_counts.get(insight_id, 0)
                     
-                    # 合并并去重
-                    all_chunks = chunks + additional_chunks
-                    seen_ids = set()
-                    unique_chunks = []
-                    for chunk in all_chunks:
-                        if chunk.id not in seen_ids:
-                            unique_chunks.append(chunk)
-                            seen_ids.add(chunk.id)
-                    
-                    # 重新排序并限制每个insight的chunks数量
-                    unique_chunks.sort(key=lambda x: x.score, reverse=True)
-                    
-                    # 限制每个insight的chunks数量
-                    max_chunks_per_insight = int(os.getenv('RAG_MAX_CHUNKS_PER_INSIGHT', '3'))
-                    insight_chunk_counts = {}
-                    filtered_chunks = []
-                    
-                    for chunk in unique_chunks:
-                        insight_id = chunk.insight_id
-                        current_count = insight_chunk_counts.get(insight_id, 0)
+                    if current_count < max_chunks_per_insight:
+                        filtered_chunks.append(chunk)
+                        insight_chunk_counts[insight_id] = current_count + 1
                         
-                        if current_count < max_chunks_per_insight:
-                            filtered_chunks.append(chunk)
-                            insight_chunk_counts[insight_id] = current_count + 1
-                            
-                            # 如果已经达到总数量限制，停止
-                            if len(filtered_chunks) >= k:
-                                break
-                    
-                    chunks = filtered_chunks
+                        # 如果已经达到总数量限制，停止
+                        if len(filtered_chunks) >= k:
+                            break
+                
+                chunks = filtered_chunks
             
             return chunks
             
@@ -490,55 +379,3 @@ class RAGService:
             # 回退到基础检索
             return await self.retrieve_chunks(query_embedding, user_id, k, min_score)
     
-    async def _get_additional_chunks(
-        self,
-        query_embedding: List[float],
-        insight_ids: List[str],
-        user_id: str,
-        k: int,
-        min_score: float
-    ) -> List[RAGChunk]:
-        """获取相关insights的额外chunks"""
-        try:
-            # 查询这些insights的所有chunks
-            chunks_query = self.supabase.table('insight_chunks').select(
-                'id, insight_id, chunk_index, chunk_text, chunk_size, created_at, embedding'
-            ).in_('insight_id', insight_ids).not_.is_('embedding', 'null')
-            
-            chunks_response = chunks_query.execute()
-            
-            if not chunks_response.data:
-                return []
-            
-            # 计算相似度
-            chunks_with_scores = []
-            for item in chunks_response.data:
-                if item['embedding']:
-                    try:
-                        embedding_data = self._normalize_embedding_data(item['embedding'], item['id'])
-                        if embedding_data is None:
-                            continue
-                        
-                        similarity = self._calculate_cosine_similarity(query_embedding, embedding_data)
-                        if similarity >= min_score:
-                            chunk = RAGChunk(
-                                id=item['id'],
-                                insight_id=item['insight_id'],
-                                chunk_index=item['chunk_index'],
-                                chunk_text=item['chunk_text'],
-                                chunk_size=item['chunk_size'],
-                                score=similarity,
-                                created_at=item['created_at']
-                            )
-                            chunks_with_scores.append(chunk)
-                    except Exception as e:
-                        logger.warning(f"处理额外chunk失败: {item['id']}, 错误: {e}")
-                        continue
-            
-            # 排序并返回
-            chunks_with_scores.sort(key=lambda x: x.score, reverse=True)
-            return chunks_with_scores[:k]
-            
-        except Exception as e:
-            logger.error(f"获取额外chunks失败: {e}")
-            return []

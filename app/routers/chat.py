@@ -152,7 +152,7 @@ async def chat_endpoint(request: Request, chat_request: ChatRequest):
         try:
             # 从配置中获取默认参数
             default_k = int(os.getenv('RAG_DEFAULT_K', '12'))
-            default_min_score = float(os.getenv('RAG_DEFAULT_MIN_SCORE', '0.2'))
+            default_min_score = float(os.getenv('RAG_DEFAULT_MIN_SCORE', '0.25'))
             
             logger.info(f"开始RAG检索 - 用户问题: {user_question[:100]}...")
             rag_context = await rag_service.retrieve(

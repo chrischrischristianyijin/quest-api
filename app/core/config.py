@@ -60,7 +60,7 @@ class Settings(BaseSettings):
     # RAG配置
     RAG_ENABLED: bool = True
     RAG_DEFAULT_K: int = 10  # 增加检索数量
-    RAG_DEFAULT_MIN_SCORE: float = 0.15  # 降低相似度阈值
+    RAG_DEFAULT_MIN_SCORE: float = 0.25  # 提高相似度阈值，获得更相关的结果
     RAG_MAX_CONTEXT_TOKENS: int = 4000  # 增加上下文token限制
     RAG_MAX_CHUNKS_PER_INSIGHT: int = 3  # 每个insight最多检索的chunks数量
     
