@@ -19,7 +19,58 @@ class RAGService:
         self.openai_base_url = os.getenv('OPENAI_BASE_URL', 'https://api.openai.com/v1')
         self.embedding_model = os.getenv('OPENAI_EMBEDDING_MODEL', 'text-embedding-3-small')
         self.embedding_dimensions = int(os.getenv('OPENAI_EMBEDDING_DIMENSIONS', '1536'))
+        self.chat_model = os.getenv('CHAT_MODEL', 'gpt-5-mini')
         
+        
+    async def extract_keywords(self, query: str) -> str:
+        """使用大语言模型提取用户问题的关键词"""
+        try:
+            if not self.openai_api_key:
+                raise ValueError("OPENAI_API_KEY 未配置")
+            
+            headers = {
+                'Authorization': f'Bearer {self.openai_api_key}',
+                'Content-Type': 'application/json',
+            }
+            
+            # 构建关键词提取提示
+            keyword_prompt = (
+                "Extract 2–5 abstracted keywords from the following user question for vector retrieval.\n"
+                "Go beyond literal words if needed: include related concepts, entities, or topics that capture the intent behind the question.\n"
+                "Keep them concise, specific, and semantically meaningful.\n"
+                "Do not include filler words (e.g., \"how\", \"problem\", \"situation\").\n"
+                "Keep the same language as the original question (Chinese → Chinese keywords, English → English keywords).\n"
+                "Output only the keywords, separated by commas. No explanations, no numbering, no line breaks.\n\n"
+                f"User question: {query}\n\n"
+                "Keywords:"
+            )
+            
+            payload = {
+                'model': self.chat_model,
+                'messages': [
+                    {"role": "user", "content": keyword_prompt}
+                ],
+                'temperature': 0.1,  # 低温度确保一致性
+                'max_tokens': 100  # 关键词提取只需要很少的token
+            }
+            
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                response = await client.post(
+                    f"{self.openai_base_url}/chat/completions",
+                    json=payload,
+                    headers=headers
+                )
+                response.raise_for_status()
+                
+                data = response.json()
+                keywords = data['choices'][0]['message']['content'].strip()
+                
+                logger.info(f"关键词提取成功: {keywords}")
+                return keywords
+                
+        except Exception as e:
+            logger.warning(f"关键词提取失败，使用原始问题: {e}")
+            return query  # 失败时返回原始问题
         
     async def embed_text(self, text: str) -> List[float]:
         """将文本转换为向量嵌入"""
@@ -332,19 +383,24 @@ class RAGService:
     ) -> RAGContext:
         """完整的RAG检索流程 - 支持个性化检索"""
         try:
-            # 1. 文本嵌入
-            query_embedding = await self.embed_text(query)
+            # 1. 关键词提取
+            logger.info(f"开始关键词提取 - 原始问题: {query}")
+            keywords = await self.extract_keywords(query)
+            logger.info(f"提取的关键词: {keywords}")
             
-            # 2. 个性化检索策略
+            # 2. 文本嵌入（使用关键词）
+            query_embedding = await self.embed_text(keywords)
+            
+            # 3. 个性化检索策略
             chunks = await self._personalized_retrieve(
                 query_embedding=query_embedding,
-                query_text=query,
+                query_text=query,  # 保留原始问题用于日志
                 user_id=user_id,
                 k=k,
                 min_score=min_score
             )
             
-            # 3. 格式化上下文
+            # 4. 格式化上下文
             context = self.format_context(chunks, max_context_tokens)
             
             return context

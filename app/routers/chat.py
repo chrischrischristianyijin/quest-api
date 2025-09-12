@@ -154,6 +154,7 @@ async def chat_endpoint(request: Request, chat_request: ChatRequest):
             default_k = int(os.getenv('RAG_DEFAULT_K', '12'))
             default_min_score = float(os.getenv('RAG_DEFAULT_MIN_SCORE', '0.2'))
             
+            logger.info(f"开始RAG检索 - 用户问题: {user_question[:100]}...")
             rag_context = await rag_service.retrieve(
                 query=user_question,
                 user_id=user_id,
@@ -164,8 +165,10 @@ async def chat_endpoint(request: Request, chat_request: ChatRequest):
             rag_chunks = rag_context.chunks
             
             if context_text:
+                logger.info(f"RAG检索成功，找到 {len(rag_chunks)} 个相关分块")
                 system_prompt += context_text
             else:
+                logger.info("RAG检索未找到相关insights")
                 system_prompt += "No relevant insights found for this query."
                 
         except Exception as e:
