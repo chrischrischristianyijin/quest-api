@@ -112,7 +112,7 @@ class RAGService:
                 'search_text': '',  # 这个函数需要文本参数，但我们主要用embedding
                 'user_id_param': user_id,
                 'similarity_threshold': min_score,
-                'max_results': k * 2  # 获取更多结果以便后续过滤
+                'max_results': k * 5  # 获取更多结果以便后续过滤
             }).execute()
             
             if response.data:
@@ -159,7 +159,7 @@ class RAGService:
             chunks_with_scores.sort(key=lambda x: x.score, reverse=True)
             
             # 限制每个insight的chunks数量
-            max_chunks_per_insight = int(os.getenv('RAG_MAX_CHUNKS_PER_INSIGHT', '3'))
+            max_chunks_per_insight = int(os.getenv('RAG_MAX_CHUNKS_PER_INSIGHT', '5'))
             insight_chunk_counts = {}
             filtered_chunks = []
             

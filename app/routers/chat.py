@@ -151,7 +151,7 @@ async def chat_endpoint(request: Request, chat_request: ChatRequest):
         rag_chunks = []
         try:
             # 从配置中获取默认参数
-            default_k = int(os.getenv('RAG_DEFAULT_K', '6'))
+            default_k = int(os.getenv('RAG_DEFAULT_K', '12'))
             default_min_score = float(os.getenv('RAG_DEFAULT_MIN_SCORE', '0.2'))
             
             rag_context = await rag_service.retrieve(
