@@ -143,14 +143,14 @@ class RAGService:
                 ).not_.is_('embedding', 'null')
             
             # 使用HNSW索引进行向量相似度搜索
-            # 这里我们需要使用原生SQL查询来利用HNSW索引
+            # 使用正确的search_similar_chunks_by_text函数
             try:
-                # 尝试使用Supabase的向量搜索RPC函数
-                response = self.supabase.rpc('search_chunks_by_embedding', {
-                    'query_embedding': query_vector_str,
+                # 使用正确的HNSW搜索函数
+                response = self.supabase.rpc('search_similar_chunks_by_text', {
+                    'search_text': '',  # 这个函数需要文本参数，但我们主要用embedding
                     'user_id_param': user_id,
-                    'match_threshold': min_score,
-                    'match_count': k * 2  # 获取更多结果以便后续过滤
+                    'similarity_threshold': min_score,
+                    'max_results': k * 2  # 获取更多结果以便后续过滤
                 }).execute()
                 
                 if response.data:
@@ -162,13 +162,8 @@ class RAGService:
                     
             except Exception as hnsw_error:
                 logger.warning(f"HNSW搜索函数不可用: {hnsw_error}")
-                # 尝试直接使用向量操作符查询
-                try:
-                    return await self._direct_hnsw_search(query_vector_str, user_id, k, min_score, only_insight)
-                except Exception as direct_error:
-                    logger.warning(f"直接HNSW搜索失败: {direct_error}")
-                    # 最后回退到传统方法
-                    return await self._fallback_retrieve_chunks_traditional(query_embedding, user_id, k, min_score, only_insight)
+                # 最后回退到传统方法
+                return await self._fallback_retrieve_chunks_traditional(query_embedding, user_id, k, min_score, only_insight)
             
         except Exception as e:
             logger.error(f"检索失败: {e}")
@@ -183,6 +178,12 @@ class RAGService:
                     # 假设HNSW结果包含similarity或distance字段
                     similarity = item.get('similarity', item.get('distance', 0.0))
                     
+                    # 处理created_at字段，确保它是有效的日期时间
+                    created_at = item.get('created_at', '')
+                    if not created_at or created_at == '':
+                        from datetime import datetime
+                        created_at = datetime.utcnow().isoformat()
+                    
                     chunk = RAGChunk(
                         id=item['id'],
                         insight_id=item['insight_id'],
@@ -190,7 +191,7 @@ class RAGService:
                         chunk_text=item['chunk_text'],
                         chunk_size=item.get('chunk_size', len(item['chunk_text'])),
                         score=float(similarity),
-                        created_at=item.get('created_at', '')
+                        created_at=created_at
                     )
                     chunks_with_scores.append(chunk)
                 except Exception as e:
@@ -225,64 +226,6 @@ class RAGService:
         except Exception as e:
             logger.error(f"处理HNSW结果失败: {e}")
             return []
-    
-    async def _direct_hnsw_search(self, query_vector_str: str, user_id: str, k: int, min_score: float, only_insight: Optional[str] = None) -> List[RAGChunk]:
-        """直接使用SQL进行HNSW向量搜索"""
-        try:
-            # 构建原生SQL查询，利用HNSW索引
-            if only_insight:
-                sql_query = f"""
-                SELECT 
-                    ic.id,
-                    ic.insight_id,
-                    ic.chunk_index,
-                    ic.chunk_text,
-                    ic.chunk_size,
-                    ic.created_at,
-                    1 - (ic.embedding <=> '{query_vector_str}'::vector) as similarity
-                FROM insight_chunks ic
-                INNER JOIN insights i ON ic.insight_id = i.id
-                WHERE i.user_id = '{user_id}'
-                AND ic.insight_id = '{only_insight}'
-                AND ic.embedding IS NOT NULL
-                AND 1 - (ic.embedding <=> '{query_vector_str}'::vector) >= {min_score}
-                ORDER BY ic.embedding <=> '{query_vector_str}'::vector
-                LIMIT {k * 2}
-                """
-            else:
-                sql_query = f"""
-                SELECT 
-                    ic.id,
-                    ic.insight_id,
-                    ic.chunk_index,
-                    ic.chunk_text,
-                    ic.chunk_size,
-                    ic.created_at,
-                    1 - (ic.embedding <=> '{query_vector_str}'::vector) as similarity
-                FROM insight_chunks ic
-                INNER JOIN insights i ON ic.insight_id = i.id
-                WHERE i.user_id = '{user_id}'
-                AND ic.embedding IS NOT NULL
-                AND 1 - (ic.embedding <=> '{query_vector_str}'::vector) >= {min_score}
-                ORDER BY ic.embedding <=> '{query_vector_str}'::vector
-                LIMIT {k * 2}
-                """
-            
-            logger.info("执行原生HNSW向量搜索SQL")
-            
-            # 使用Supabase的SQL查询功能
-            response = self.supabase.rpc('execute_sql', {'sql': sql_query}).execute()
-            
-            if response.data:
-                logger.info(f"原生HNSW搜索找到 {len(response.data)} 个候选分块")
-                return self._process_hnsw_results(response.data, k)
-            else:
-                logger.info("原生HNSW搜索没有找到结果")
-                return []
-                
-        except Exception as e:
-            logger.error(f"原生HNSW搜索失败: {e}")
-            raise
     
     async def _fallback_retrieve_chunks_traditional(
         self, 
@@ -385,6 +328,12 @@ class RAGService:
             for i, similarity in enumerate(similarities):
                 if similarity >= min_score:
                     item = valid_items[i]
+                    # 处理created_at字段，确保它是有效的日期时间
+                    created_at = item.get('created_at', '')
+                    if not created_at or created_at == '':
+                        from datetime import datetime
+                        created_at = datetime.utcnow().isoformat()
+                    
                     chunk = RAGChunk(
                         id=item['id'],
                         insight_id=item['insight_id'],
@@ -392,7 +341,7 @@ class RAGService:
                         chunk_text=item['chunk_text'],
                         chunk_size=len(item['chunk_text']),  # 计算chunk_size
                         score=similarity,
-                        created_at=item.get('created_at', '')  # 如果没有created_at字段
+                        created_at=created_at
                     )
                     chunks_with_scores.append(chunk)
             
