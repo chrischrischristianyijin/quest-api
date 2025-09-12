@@ -128,22 +128,23 @@ class RAGService:
         user_id: Optional[str] = None,
         k: int = 10, 
         min_score: float = 0.15,
-        only_insight: Optional[str] = None
+        only_insight: Optional[str] = None,
+        query_text: str = ""
     ) -> List[RAGChunk]:
         """检索相关分块 - 支持多种检索策略"""
         try:
             # 策略1: 基础检索（只查询用户insights）
-            chunks = await self._fallback_retrieve_chunks(query_embedding, user_id, k, min_score, only_insight)
+            chunks = await self._fallback_retrieve_chunks(query_embedding, user_id, k, min_score, only_insight, query_text)
             
             # 如果结果不足，尝试策略2: 降低阈值重新检索
             if len(chunks) < k and min_score > 0.1:
                 logger.info(f"结果不足({len(chunks)}/{k})，降低阈值重新检索")
-                chunks = await self._fallback_retrieve_chunks(query_embedding, user_id, k, 0.1, only_insight)
+                chunks = await self._fallback_retrieve_chunks(query_embedding, user_id, k, 0.1, only_insight, query_text)
             
             # 策略3: 如果仍然不足，尝试增加k值
             if len(chunks) < k:
                 logger.info(f"结果仍然不足({len(chunks)}/{k})，增加检索数量")
-                chunks = await self._fallback_retrieve_chunks(query_embedding, user_id, k * 2, 0.05, only_insight)
+                chunks = await self._fallback_retrieve_chunks(query_embedding, user_id, k * 2, 0.05, only_insight, query_text)
                 # 只取前k个
                 chunks = chunks[:k]
             
@@ -159,7 +160,8 @@ class RAGService:
         user_id: Optional[str] = None,
         k: int = 10, 
         min_score: float = 0.15,
-        only_insight: Optional[str] = None
+        only_insight: Optional[str] = None,
+        query_text: str = ""
     ) -> List[RAGChunk]:
         """使用Supabase HNSW向量搜索的检索方法"""
         try:
@@ -173,10 +175,9 @@ class RAGService:
             
             logger.info(f"使用HNSW向量搜索，用户: {user_id}")
             
-            # 尝试使用基于向量的HNSW搜索函数
+            # 使用向量搜索函数
             try:
-                # 方法1: 尝试使用专门的向量搜索函数
-                response = self.supabase.rpc('search_similar_chunks', {
+                response = self.supabase.rpc('search_similar_chunks_by_vector', {
                     'query_embedding': query_vector_str,
                     'user_id_param': user_id,
                     'similarity_threshold': min_score,
@@ -186,14 +187,18 @@ class RAGService:
                 if response.data:
                     logger.info(f"HNSW向量搜索找到 {len(response.data)} 个候选分块")
                     return self._process_hnsw_results(response.data, k)
+                else:
+                    logger.info("HNSW向量搜索没有找到结果")
+                    return []
                     
             except Exception as vector_error:
-                logger.warning(f"向量搜索函数失败: {vector_error}")
+                logger.warning(f"HNSW向量搜索失败: {vector_error}")
                 
-                # 方法2: 回退到文本搜索（使用关键词）
+                # 回退到文本搜索
                 try:
+                    logger.info("回退到文本搜索")
                     response = self.supabase.rpc('search_similar_chunks_by_text', {
-                        'search_text': query_text,  # 使用原始查询文本
+                        'search_text': query_text,
                         'user_id_param': user_id,
                         'similarity_threshold': min_score,
                         'max_results': k * 5
@@ -202,12 +207,13 @@ class RAGService:
                     if response.data:
                         logger.info(f"文本搜索找到 {len(response.data)} 个候选分块")
                         return self._process_hnsw_results(response.data, k)
+                    else:
+                        logger.info("文本搜索没有找到结果")
+                        return []
                         
                 except Exception as text_error:
                     logger.warning(f"文本搜索也失败: {text_error}")
-            
-            logger.info("所有搜索方法都没有找到结果")
-            return []
+                    return []
             
         except Exception as e:
             logger.error(f"检索失败: {e}")
@@ -460,7 +466,8 @@ class RAGService:
                 query_embedding=query_embedding,
                 user_id=user_id,
                 k=k,
-                min_score=min_score
+                min_score=min_score,
+                query_text=query_text
             )
             
             # 如果用户有insights，尝试获取更多上下文
