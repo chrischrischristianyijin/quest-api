@@ -9,6 +9,7 @@ from app.services.memory_service import MemoryService
 from app.models.chat_storage import ChatSessionCreate, ChatMessageCreate, ChatRAGContextCreate, RAGChunkInfo, MessageRole
 from app.utils.summarize import estimate_tokens
 from typing import Dict, Any, Optional, AsyncGenerator
+from uuid import UUID
 import os
 import logging
 import httpx
