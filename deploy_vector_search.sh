@@ -9,13 +9,15 @@ if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then
     exit 1
 fi
 
-# 使用Supabase CLI执行SQL
-echo "📝 执行SQL脚本..."
-supabase db reset --db-url "postgresql://postgres:[password]@[host]:5432/postgres" --file database/migrations/create_vector_search_function.sql
+# 使用psql直接连接执行修复脚本
+echo "🔧 执行函数修复脚本..."
+psql "$SUPABASE_URL" -f database/migrations/fix_vector_search_function.sql
 
-# 或者使用psql直接连接
-echo "🔧 使用psql连接..."
-psql "$SUPABASE_URL" -f database/migrations/create_vector_search_function.sql
+# 如果上面失败，尝试执行原始脚本
+if [ $? -ne 0 ]; then
+    echo "⚠️ 修复脚本失败，尝试执行原始脚本..."
+    psql "$SUPABASE_URL" -f database/migrations/create_vector_search_function.sql
+fi
 
 echo "✅ 向量搜索函数部署完成!"
 echo ""

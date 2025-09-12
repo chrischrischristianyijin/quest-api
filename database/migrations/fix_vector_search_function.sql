@@ -1,10 +1,10 @@
--- 创建基于向量的HNSW搜索函数
--- 这个函数使用pgvector的HNSW索引进行高效的向量相似度搜索
+-- 修复向量搜索函数的返回类型问题
+-- 将similarity列从real改为double precision
 
--- 1. 确保安装了pgvector扩展
-CREATE EXTENSION IF NOT EXISTS vector;
+-- 删除现有函数（如果存在）
+DROP FUNCTION IF EXISTS search_similar_chunks_by_vector(vector(1536), uuid, real, integer);
 
--- 2. 创建向量搜索函数
+-- 重新创建函数，使用正确的返回类型
 CREATE OR REPLACE FUNCTION search_similar_chunks_by_vector(
     query_embedding vector(1536),
     user_id_param uuid,
@@ -30,7 +30,7 @@ BEGIN
         ic.chunk_index,
         ic.chunk_text,
         ic.chunk_size,
-        (1 - (ic.embedding <=> query_embedding)) as similarity,
+        (1 - (ic.embedding <=> query_embedding))::double precision as similarity,
         ic.created_at
     FROM insight_chunks ic
     INNER JOIN insights i ON ic.insight_id = i.id
@@ -42,18 +42,9 @@ BEGIN
 END;
 $$;
 
--- 3. 添加函数注释
+-- 添加函数注释
 COMMENT ON FUNCTION search_similar_chunks_by_vector(vector(1536), uuid, real, integer) 
 IS '使用HNSW索引进行向量相似度搜索，返回用户insights中最相似的分块。similarity列返回double precision类型。';
 
--- 4. 创建索引（如果不存在）
-CREATE INDEX IF NOT EXISTS idx_insight_chunks_embedding_hnsw 
-ON insight_chunks USING hnsw (embedding vector_cosine_ops);
-
--- 5. 创建用户insights的索引（优化JOIN性能）
-CREATE INDEX IF NOT EXISTS idx_insights_user_id 
-ON insights (user_id);
-
--- 6. 验证函数创建成功
--- 可以通过以下查询测试函数：
--- SELECT * FROM search_similar_chunks_by_vector('[0.1,0.2,0.3,...]'::vector(1536), 'user-uuid-here', 0.7, 10);
+-- 验证函数
+-- SELECT * FROM search_similar_chunks_by_vector('[0.1,0.2,0.3]'::vector(1536), '00000000-0000-0000-0000-000000000000'::uuid, 0.7, 10);

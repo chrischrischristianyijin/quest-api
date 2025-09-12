@@ -186,6 +186,9 @@ class RAGService:
                 
                 if response.data:
                     logger.info(f"HNSW向量搜索找到 {len(response.data)} 个候选分块")
+                    # 调试：显示第一个结果的结构
+                    if response.data:
+                        logger.debug(f"第一个结果的结构: {response.data[0]}")
                     return self._process_hnsw_results(response.data, k)
                 else:
                     logger.info("HNSW向量搜索没有找到结果")
@@ -193,27 +196,7 @@ class RAGService:
                     
             except Exception as vector_error:
                 logger.warning(f"HNSW向量搜索失败: {vector_error}")
-                
-                # 回退到文本搜索
-                try:
-                    logger.info("回退到文本搜索")
-                    response = self.supabase.rpc('search_similar_chunks_by_text', {
-                        'search_text': query_text,
-                        'user_id_param': user_id,
-                        'similarity_threshold': min_score,
-                        'max_results': k * 5
-                    }).execute()
-                    
-                    if response.data:
-                        logger.info(f"文本搜索找到 {len(response.data)} 个候选分块")
-                        return self._process_hnsw_results(response.data, k)
-                    else:
-                        logger.info("文本搜索没有找到结果")
-                        return []
-                        
-                except Exception as text_error:
-                    logger.warning(f"文本搜索也失败: {text_error}")
-                    return []
+                return []
             
         except Exception as e:
             logger.error(f"检索失败: {e}")
@@ -235,7 +218,7 @@ class RAGService:
                         created_at = datetime.utcnow().isoformat()
                     
                     chunk = RAGChunk(
-                        id=item['id'],
+                        id=item.get('chunk_id', item.get('id')),  # 支持两种字段名
                         insight_id=item['insight_id'],
                         chunk_index=item['chunk_index'],
                         chunk_text=item['chunk_text'],
@@ -245,7 +228,8 @@ class RAGService:
                     )
                     chunks_with_scores.append(chunk)
                 except Exception as e:
-                    logger.warning(f"处理HNSW结果失败: {item.get('id')}, 错误: {e}")
+                    logger.warning(f"处理HNSW结果失败: {item.get('chunk_id', item.get('id', 'unknown'))}, 错误: {e}")
+                    logger.debug(f"问题数据项: {item}")
                     continue
             
             # 按相似度排序
