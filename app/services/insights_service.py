@@ -81,7 +81,7 @@ class InsightsService:
             
             # 构建查询 - 包含JSONB tags字段和stack_id，以及summary字段
             query = supabase.table('insights').select(
-                'id, title, description, url, image_url, created_at, updated_at, tags, stack_id, insight_contents(summary, thought)'
+                'id, title, description, url, image_url, created_at, updated_at, tags, stack_id, insight_contents!left(summary, thought)'
             ).eq('user_id', query_user_id)
             
             # 添加stack_id筛选条件
@@ -187,7 +187,7 @@ class InsightsService:
             
             # 构建查询 - 包含JSONB tags字段和stack_id，以及summary字段
             query = supabase.table('insights').select(
-                'id, title, description, url, image_url, created_at, updated_at, tags, stack_id, insight_contents(summary, thought)'
+                'id, title, description, url, image_url, created_at, updated_at, tags, stack_id, insight_contents!left(summary, thought)'
             ).eq('user_id', query_user_id)
             
             # 添加搜索条件
@@ -269,7 +269,7 @@ class InsightsService:
             
             # 构建基础查询 - 包含JSONB tags字段，以及summary字段
             query = supabase.table('insights').select(
-                'id, title, description, url, image_url, created_at, updated_at, tags, insight_contents(summary, thought)'
+                'id, title, description, url, image_url, created_at, updated_at, tags, insight_contents!left(summary, thought)'
             ).eq('user_id', str(user_id))
             
             # 时间过滤：只获取指定时间之后的数据
