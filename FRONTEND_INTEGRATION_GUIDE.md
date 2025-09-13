@@ -21,22 +21,20 @@ POST /chat
 #### **新接口**
 ```javascript
 // 现在支持会话管理
-POST /chat
+POST /chat?session_id=uuid  // session_id作为查询参数
+Authorization: Bearer token  // user_id通过Authorization头传递
 {
-  "question": "用户问题",
-  "user_id": "uuid",
-  "session_id": "uuid"  // 可选，不传则创建新会话
+  "message": "用户问题"  // 注意：字段名改为message
 }
 ```
 
 #### **响应格式**
 ```javascript
 // 流式响应保持不变
-// 但响应头包含会话信息
-{
-  "session_id": "uuid",  // 在响应头中
-  "stream": "data: {...}"
-}
+// 会话ID在响应头中返回
+// 响应头: X-Session-ID: uuid
+// 流式数据: data: {"type": "content", "content": "..."}
+// 结束标记: data: {"type": "done", "session_id": "uuid", ...}
 ```
 
 ### 2. 新增会话管理接口
@@ -181,15 +179,19 @@ class ChatApiService {
 
   // 发送聊天消息
   async sendMessage(question, userId, sessionId = null) {
-    const response = await fetch(`${this.baseURL}/chat`, {
+    // 构建URL，session_id作为查询参数
+    const url = sessionId 
+      ? `${this.baseURL}/chat?session_id=${sessionId}`
+      : `${this.baseURL}/chat`;
+    
+    const response = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'Authorization': `Bearer ${userId}`  // 假设userId就是token
       },
       body: JSON.stringify({
-        question,
-        user_id: userId,
-        session_id: sessionId
+        message: question  // 注意：字段名是message，不是question
       })
     });
 

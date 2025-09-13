@@ -140,12 +140,23 @@ async def chat_endpoint(request: Request, chat_request: ChatRequest, session_id:
         current_session_id = None
         if session_id:
             try:
-                current_session_id = UUID(session_id)
+                session_uuid = UUID(session_id)
+                # 验证会话是否存在且属于当前用户
+                existing_session = await chat_storage.get_session(session_uuid)
+                if existing_session and existing_session.user_id == UUID(user_id):
+                    current_session_id = session_uuid
+                    logger.info(f"使用现有会话: {current_session_id}")
+                else:
+                    logger.warning(f"会话不存在或不属于当前用户: {session_id}")
+                    current_session_id = None
             except ValueError:
-                logger.warning(f"无效的session_id: {session_id}")
+                logger.warning(f"无效的session_id格式: {session_id}")
+            except Exception as e:
+                logger.warning(f"验证会话失败: {e}")
+                current_session_id = None
         
         if not current_session_id and user_id:
-            # 如果没有提供session_id，创建新会话
+            # 如果没有提供session_id或会话验证失败，创建新会话
             try:
                 new_session = await chat_storage.create_session(
                     ChatSessionCreate(user_id=UUID(user_id))
@@ -156,18 +167,8 @@ async def chat_endpoint(request: Request, chat_request: ChatRequest, session_id:
                 logger.warning(f"创建聊天会话失败: {e}")
                 current_session_id = None
         
-        # 获取相关记忆
-        relevant_memories = []
-        if current_session_id:
-            try:
-                relevant_memories = await memory_service.get_relevant_memories(
-                    session_id=current_session_id,
-                    query=user_question,
-                    limit=3
-                )
-                logger.info(f"获取到 {len(relevant_memories)} 个相关记忆")
-            except Exception as e:
-                logger.warning(f"获取记忆失败: {e}")
+        # 并行执行数据库查询（性能优化）
+        import asyncio
         
         # 构建系统提示
         system_prompt = (
@@ -186,6 +187,66 @@ async def chat_endpoint(request: Request, chat_request: ChatRequest, session_id:
             "- Avoid unsafe content; no medical/legal/financial advice beyond general info.\n\n"
         )
         
+        # 并行执行查询任务
+        async def get_memories():
+            if current_session_id:
+                try:
+                    memories = await memory_service.get_relevant_memories(
+                        session_id=current_session_id,
+                        query=user_question,
+                        limit=3
+                    )
+                    logger.info(f"获取到 {len(memories)} 个相关记忆")
+                    return memories
+                except Exception as e:
+                    logger.warning(f"获取记忆失败: {e}")
+            return []
+        
+        async def get_rag_context():
+            try:
+                # 从配置中获取默认参数（优化性能）
+                default_k = int(os.getenv('RAG_DEFAULT_K', '8'))  # 减少到8个分块
+                default_min_score = float(os.getenv('RAG_DEFAULT_MIN_SCORE', '0.3'))  # 提高阈值
+                
+                logger.info(f"开始RAG检索 - 用户问题: {user_question[:100]}...")
+                rag_context = await rag_service.retrieve(
+                    query=user_question,
+                    user_id=user_id,
+                    k=default_k,
+                    min_score=default_min_score
+                )
+                logger.info(f"RAG检索成功，找到 {len(rag_context.chunks)} 个相关分块")
+                return rag_context
+            except Exception as e:
+                logger.warning(f"RAG检索失败: {e}")
+                return None
+        
+        # 并行执行查询
+        relevant_memories, rag_context = await asyncio.gather(
+            get_memories(),
+            get_rag_context(),
+            return_exceptions=True
+        )
+        
+        # 处理记忆结果
+        if isinstance(relevant_memories, Exception):
+            relevant_memories = []
+        
+        # 处理RAG结果
+        context_text = ""
+        rag_chunks = []
+        if isinstance(rag_context, Exception) or rag_context is None:
+            logger.warning("RAG检索失败")
+            system_prompt += "RAG service is temporarily unavailable."
+        else:
+            context_text = rag_context.context_text
+            rag_chunks = rag_context.chunks
+            if context_text:
+                system_prompt += context_text
+            else:
+                logger.info("RAG检索未找到相关insights")
+                system_prompt += "No relevant insights found for this query."
+        
         # 添加记忆上下文
         if relevant_memories:
             system_prompt += "【Relevant memories from our conversation】\n"
@@ -195,93 +256,72 @@ async def chat_endpoint(request: Request, chat_request: ChatRequest, session_id:
         
         system_prompt += "【Context from your insights】\n"
         
-        # 自动进行RAG检索（使用后端配置的默认参数）
-        context_text = ""
-        rag_chunks = []
-        try:
-            # 从配置中获取默认参数
-            default_k = int(os.getenv('RAG_DEFAULT_K', '12'))
-            default_min_score = float(os.getenv('RAG_DEFAULT_MIN_SCORE', '0.25'))
-            
-            logger.info(f"开始RAG检索 - 用户问题: {user_question[:100]}...")
-            rag_context = await rag_service.retrieve(
-                query=user_question,
-                user_id=user_id,
-                k=default_k,
-                min_score=default_min_score
-            )
-            context_text = rag_context.context_text
-            rag_chunks = rag_context.chunks
-            
-            if context_text:
-                logger.info(f"RAG检索成功，找到 {len(rag_chunks)} 个相关分块")
-                system_prompt += context_text
-            else:
-                logger.info("RAG检索未找到相关insights")
-                system_prompt += "No relevant insights found for this query."
-                
-        except Exception as e:
-            logger.warning(f"RAG检索失败: {e}")
-            system_prompt += "RAG service is temporarily unavailable."
-        
-        # 存储用户消息
-        user_message_id = None
-        if current_session_id:
-            try:
-                user_message = await chat_storage.create_message(
-                    ChatMessageCreate(
-                        session_id=current_session_id,
-                        role=MessageRole.USER,
-                        content=user_question,
-                        metadata={
-                            "request_id": request_id,
-                            "user_id": user_id,
-                            "client_ip": client_ip
-                        }
+        # 异步存储用户消息（不阻塞响应）
+        async def store_user_message():
+            if current_session_id:
+                try:
+                    user_message = await chat_storage.create_message(
+                        ChatMessageCreate(
+                            session_id=current_session_id,
+                            role=MessageRole.USER,
+                            content=user_question,
+                            metadata={
+                                "request_id": request_id,
+                                "user_id": user_id,
+                                "client_ip": client_ip
+                            }
+                        )
                     )
-                )
-                user_message_id = user_message.id
-                logger.info(f"存储用户消息: {user_message_id}")
-            except Exception as e:
-                logger.warning(f"存储用户消息失败: {e}")
+                    logger.info(f"存储用户消息: {user_message.id}")
+                    return user_message.id
+                except Exception as e:
+                    logger.warning(f"存储用户消息失败: {e}")
+            return None
         
-        # 存储RAG上下文
-        if current_session_id and user_message_id and rag_chunks:
-            try:
-                # 转换RAG分块格式
-                rag_chunk_infos = []
-                for chunk in rag_chunks:
-                    # 确保created_at是字符串格式
-                    created_at_str = chunk.created_at
-                    if hasattr(created_at_str, 'isoformat'):
-                        created_at_str = created_at_str.isoformat()
-                    elif not isinstance(created_at_str, str):
-                        created_at_str = str(created_at_str)
+        # 异步存储RAG上下文
+        async def store_rag_context(user_message_id):
+            if current_session_id and user_message_id and rag_chunks:
+                try:
+                    # 转换RAG分块格式
+                    rag_chunk_infos = []
+                    for chunk in rag_chunks:
+                        # 确保created_at是字符串格式
+                        created_at_str = chunk.created_at
+                        if hasattr(created_at_str, 'isoformat'):
+                            created_at_str = created_at_str.isoformat()
+                        elif not isinstance(created_at_str, str):
+                            created_at_str = str(created_at_str)
+                        
+                        rag_chunk_infos.append(RAGChunkInfo(
+                            id=str(chunk.id),
+                            insight_id=str(chunk.insight_id),
+                            chunk_index=chunk.chunk_index,
+                            chunk_text=chunk.chunk_text,
+                            chunk_size=chunk.chunk_size,
+                            score=chunk.score,
+                            created_at=created_at_str
+                        ))
                     
-                    rag_chunk_infos.append(RAGChunkInfo(
-                        id=str(chunk.id),
-                        insight_id=str(chunk.insight_id),
-                        chunk_index=chunk.chunk_index,
-                        chunk_text=chunk.chunk_text,
-                        chunk_size=chunk.chunk_size,
-                        score=chunk.score,
-                        created_at=created_at_str
-                    ))
-                
-                await chat_storage.create_rag_context(
-                    ChatRAGContextCreate(
-                        message_id=user_message_id,
-                        rag_chunks=rag_chunk_infos,
-                        context_text=context_text,
-                        total_context_tokens=rag_context.total_tokens,
-                        extracted_keywords=keywords if 'keywords' in locals() else None,
-                        rag_k=default_k,
-                        rag_min_score=default_min_score
+                    await chat_storage.create_rag_context(
+                        ChatRAGContextCreate(
+                            message_id=user_message_id,
+                            rag_chunks=rag_chunk_infos,
+                            context_text=context_text,
+                            total_context_tokens=rag_context.total_tokens if rag_context else 0,
+                            extracted_keywords=None,
+                            rag_k=int(os.getenv('RAG_DEFAULT_K', '8')),
+                            rag_min_score=float(os.getenv('RAG_DEFAULT_MIN_SCORE', '0.3'))
+                        )
                     )
-                )
-                logger.info(f"存储RAG上下文成功")
-            except Exception as e:
-                logger.warning(f"存储RAG上下文失败: {e}")
+                    logger.info(f"存储RAG上下文成功")
+                except Exception as e:
+                    logger.warning(f"存储RAG上下文失败: {e}")
+        
+        # 启动异步存储任务（不等待完成）
+        storage_task = asyncio.create_task(store_user_message())
+        storage_task.add_done_callback(
+            lambda task: asyncio.create_task(store_rag_context(task.result())) if task.result() else None
+        )
         
         # 构建完整的消息列表
         messages = [
@@ -303,17 +343,22 @@ async def chat_endpoint(request: Request, chat_request: ChatRequest, session_id:
         use_stream = os.getenv('CHAT_DEFAULT_STREAM', 'true').lower() in ('true', '1', 'yes')
         
         if use_stream:
+            # 构建响应头，包含会话ID
+            headers = {
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no"
+            }
+            if current_session_id:
+                headers["X-Session-ID"] = str(current_session_id)
+            
             return StreamingResponse(
                 stream_chat_response(
                     messages, request_id, start_time, rag_chunks, 
                     current_session_id, chat_storage, memory_service, user_id
                 ),
                 media_type="text/event-stream",
-                headers={
-                    "Cache-Control": "no-cache, no-store, must-revalidate",
-                    "Connection": "keep-alive",
-                    "X-Accel-Buffering": "no"
-                }
+                headers=headers
             )
         else:
             # 非流式响应
@@ -340,7 +385,7 @@ async def chat_endpoint(request: Request, chat_request: ChatRequest, session_id:
             # 合并sources，按insight_id分组
             merged_sources = merge_chunks_to_sources(rag_chunks)
             
-            return {
+            response_data = {
                 "success": True,
                 "message": "聊天响应生成成功",
                 "data": {
@@ -351,6 +396,12 @@ async def chat_endpoint(request: Request, chat_request: ChatRequest, session_id:
                     "tokens_used": estimate_tokens(response_text)
                 }
             }
+            
+            # 添加会话ID到响应数据中
+            if current_session_id:
+                response_data["data"]["session_id"] = str(current_session_id)
+            
+            return response_data
     
     except HTTPException:
         raise
@@ -431,6 +482,10 @@ async def stream_chat_response(
                                 'latency_ms': latency_ms,
                                 'sources': merge_chunks_to_sources(rag_chunks)
                             }
+                            
+                            # 添加会话ID到结束标记
+                            if session_id:
+                                end_data['session_id'] = str(session_id)
                             
                             # 异步触发记忆整合（不阻塞响应）
                             if session_id and user_id:
