@@ -92,3 +92,69 @@ async def get_profile(credentials: HTTPAuthorizationCredentials = Depends(securi
     except Exception as e:
         logger.error(f"获取用户资料失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# 记忆档案相关端点
+
+@router.post("/memory/consolidate")
+async def consolidate_user_memories(
+    request: UserMemoryConsolidationRequest,
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """整合用户记忆到profile中"""
+    try:
+        user_id = credentials.credentials
+        result = await user_service.consolidate_user_memories(user_id, request)
+        return result
+    except Exception as e:
+        logger.error(f"整合用户记忆失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/memory/profile")
+async def get_user_memory_profile(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """获取用户记忆档案"""
+    try:
+        user_id = credentials.credentials
+        result = await user_service.get_user_memory_profile(user_id)
+        return result
+    except Exception as e:
+        logger.error(f"获取用户记忆档案失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.put("/memory/settings")
+async def update_memory_profile_settings(
+    settings: Dict[str, Any],
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """更新记忆档案设置"""
+    try:
+        user_id = credentials.credentials
+        result = await user_service.update_memory_profile_settings(user_id, settings)
+        return result
+    except Exception as e:
+        logger.error(f"更新记忆档案设置失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/memory/summary")
+async def get_memory_summary(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """获取用户记忆摘要"""
+    try:
+        user_id = credentials.credentials
+        result = await user_service.get_memory_summary(user_id)
+        return result
+    except Exception as e:
+        logger.error(f"获取记忆摘要失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/memory/auto-consolidate")
+async def auto_consolidate_memories(
+    session_id: Optional[str] = None,
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """自动整合用户记忆"""
+    try:
+        user_id = credentials.credentials
+        result = await user_service.auto_consolidate_memories(user_id, session_id)
+        return result
+    except Exception as e:
+        logger.error(f"自动整合记忆失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

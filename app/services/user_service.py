@@ -1,14 +1,17 @@
-from app.models.user import UserUpdate
+from app.models.user import UserUpdate, UserMemoryProfile, UserMemoryConsolidationRequest
 from app.core.database import get_supabase_service
+from app.services.memory_profile_service import MemoryProfileService
 from typing import Dict, Any, Optional
 import logging
 import os
+from uuid import UUID
 
 logger = logging.getLogger(__name__)
 
 class UserService:
     def __init__(self):
         self.supabase_service = get_supabase_service()
+        self.memory_profile_service = MemoryProfileService()
 
     async def update_user_profile(self, user_id: str, user_update: UserUpdate) -> Dict[str, Any]:
         """更新用户资料"""
@@ -21,6 +24,8 @@ class UserService:
                 update_data['avatar_url'] = user_update.avatar_url
             if user_update.bio is not None:
                 update_data['bio'] = user_update.bio
+            if user_update.memory_profile is not None:
+                update_data['memory_profile'] = user_update.memory_profile.dict()
 
             if update_data:
                 response = self.supabase_service.table('profiles').update(update_data).eq('id', user_id).execute()
@@ -118,3 +123,117 @@ class UserService:
         except Exception as e:
             logger.error(f"更新头像URL失败: {e}")
             raise ValueError(f"更新头像URL失败: {e}")
+
+    # 记忆档案相关方法
+    
+    async def consolidate_user_memories(self, user_id: str, request: Optional[UserMemoryConsolidationRequest] = None) -> Dict[str, Any]:
+        """整合用户记忆到profile中"""
+        try:
+            user_uuid = UUID(user_id)
+            memory_profile = await self.memory_profile_service.consolidate_user_memories_to_profile(user_uuid, request)
+            
+            # 保存到用户profile
+            await self.memory_profile_service._save_memory_profile_to_user(user_uuid, memory_profile)
+            
+            logger.info(f"用户 {user_id} 记忆整合成功")
+            return {
+                "success": True,
+                "message": "记忆整合成功",
+                "memory_profile": memory_profile.dict()
+            }
+            
+        except Exception as e:
+            logger.error(f"整合用户记忆失败: {e}")
+            return {
+                "success": False,
+                "message": f"整合用户记忆失败: {e}"
+            }
+    
+    async def get_user_memory_profile(self, user_id: str) -> Dict[str, Any]:
+        """获取用户记忆档案"""
+        try:
+            user_uuid = UUID(user_id)
+            memory_profile = await self.memory_profile_service.get_user_memory_profile(user_uuid)
+            
+            return {
+                "success": True,
+                "memory_profile": memory_profile.dict()
+            }
+            
+        except Exception as e:
+            logger.error(f"获取用户记忆档案失败: {e}")
+            return {
+                "success": False,
+                "message": f"获取用户记忆档案失败: {e}",
+                "memory_profile": {}
+            }
+    
+    async def update_memory_profile_settings(self, user_id: str, settings: Dict[str, Any]) -> Dict[str, Any]:
+        """更新记忆档案设置"""
+        try:
+            user_uuid = UUID(user_id)
+            success = await self.memory_profile_service.update_memory_profile_settings(user_uuid, settings)
+            
+            if success:
+                return {
+                    "success": True,
+                    "message": "记忆档案设置更新成功"
+                }
+            else:
+                return {
+                    "success": False,
+                    "message": "记忆档案设置更新失败"
+                }
+                
+        except Exception as e:
+            logger.error(f"更新记忆档案设置失败: {e}")
+            return {
+                "success": False,
+                "message": f"更新记忆档案设置失败: {e}"
+            }
+    
+    async def get_memory_summary(self, user_id: str) -> Dict[str, Any]:
+        """获取用户记忆摘要"""
+        try:
+            user_uuid = UUID(user_id)
+            summary = await self.memory_profile_service.get_memory_summary(user_uuid)
+            
+            return {
+                "success": True,
+                "summary": summary
+            }
+            
+        except Exception as e:
+            logger.error(f"获取记忆摘要失败: {e}")
+            return {
+                "success": False,
+                "message": f"获取记忆摘要失败: {e}",
+                "summary": {}
+            }
+    
+    async def auto_consolidate_memories(self, user_id: str, session_id: Optional[str] = None) -> Dict[str, Any]:
+        """自动整合用户记忆"""
+        try:
+            user_uuid = UUID(user_id)
+            session_uuid = UUID(session_id) if session_id else None
+            
+            memory_profile = await self.memory_profile_service.auto_consolidate_user_memories(user_uuid, session_uuid)
+            
+            if memory_profile:
+                return {
+                    "success": True,
+                    "message": "记忆自动整合完成",
+                    "memory_profile": memory_profile.dict()
+                }
+            else:
+                return {
+                    "success": True,
+                    "message": "无需整合记忆"
+                }
+                
+        except Exception as e:
+            logger.error(f"自动整合记忆失败: {e}")
+            return {
+                "success": False,
+                "message": f"自动整合记忆失败: {e}"
+            }

@@ -6,6 +6,7 @@ from app.services.rag_service import RAGService
 from app.services.auth_service import AuthService
 from app.services.chat_storage_service import ChatStorageService
 from app.services.memory_service import MemoryService
+from app.services.user_service import UserService
 from app.models.chat_storage import ChatSessionCreate, ChatMessageCreate, ChatRAGContextCreate, RAGChunkInfo, MessageRole
 from app.utils.summarize import estimate_tokens
 from typing import Dict, Any, Optional, AsyncGenerator
@@ -313,6 +314,21 @@ async def chat_endpoint(request: Request, chat_request: ChatRequest, session_id:
             latency_ms = int((time.time() - start_time) * 1000)
             logger.info(f"聊天请求完成 - Request ID: {request_id}, Latency: {latency_ms}ms")
             
+            # 异步触发记忆整合（不阻塞响应）
+            if session_id:
+                try:
+                    user_service = UserService()
+                    # 在后台任务中执行记忆整合
+                    import asyncio
+                    asyncio.create_task(
+                        user_service.auto_consolidate_memories(
+                            user_id=user_id, 
+                            session_id=str(session_id)
+                        )
+                    )
+                except Exception as e:
+                    logger.warning(f"触发自动记忆整合失败: {e}")
+            
             return {
                 "success": True,
                 "message": "聊天响应生成成功",
@@ -419,6 +435,21 @@ async def stream_chat_response(
                                     for chunk in rag_chunks
                                 ]
                             }
+                            
+                            # 异步触发记忆整合（不阻塞响应）
+                            if session_id:
+                                try:
+                                    user_service = UserService()
+                                    # 在后台任务中执行记忆整合
+                                    import asyncio
+                                    asyncio.create_task(
+                                        user_service.auto_consolidate_memories(
+                                            user_id=user_id, 
+                                            session_id=str(session_id)
+                                        )
+                                    )
+                                except Exception as e:
+                                    logger.warning(f"触发自动记忆整合失败: {e}")
                             yield f"data: {json.dumps(end_data, ensure_ascii=False)}\n\n"
                             break
                         
