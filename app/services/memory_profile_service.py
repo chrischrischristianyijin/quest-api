@@ -283,8 +283,25 @@ class MemoryProfileService:
     ) -> bool:
         """保存记忆档案到用户profile"""
         try:
-            # 将记忆档案转换为JSON格式
+            # 将记忆档案转换为JSON格式，处理datetime序列化
             memory_profile_dict = memory_profile.dict()
+            
+            # 处理datetime字段的序列化
+            if memory_profile_dict.get('last_consolidated'):
+                memory_profile_dict['last_consolidated'] = memory_profile_dict['last_consolidated'].isoformat()
+            
+            # 递归处理嵌套字典中的datetime字段
+            def serialize_datetime(obj):
+                if isinstance(obj, dict):
+                    return {k: serialize_datetime(v) for k, v in obj.items()}
+                elif isinstance(obj, list):
+                    return [serialize_datetime(item) for item in obj]
+                elif isinstance(obj, datetime):
+                    return obj.isoformat()
+                else:
+                    return obj
+            
+            memory_profile_dict = serialize_datetime(memory_profile_dict)
             
             # 更新用户profile
             response = self.chat_storage.supabase.table('profiles').update({

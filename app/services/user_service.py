@@ -5,6 +5,18 @@ from typing import Dict, Any, Optional
 import logging
 import os
 from uuid import UUID
+from datetime import datetime
+
+def serialize_datetime_for_json(obj):
+    """递归序列化对象中的datetime字段为ISO格式字符串"""
+    if isinstance(obj, dict):
+        return {k: serialize_datetime_for_json(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [serialize_datetime_for_json(item) for item in obj]
+    elif isinstance(obj, datetime):
+        return obj.isoformat()
+    else:
+        return obj
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +37,11 @@ class UserService:
             if user_update.bio is not None:
                 update_data['bio'] = user_update.bio
             if user_update.memory_profile is not None:
-                update_data['memory_profile'] = user_update.memory_profile.dict()
+                memory_profile_dict = user_update.memory_profile.dict()
+                # 处理datetime字段的序列化
+                if memory_profile_dict.get('last_consolidated'):
+                    memory_profile_dict['last_consolidated'] = memory_profile_dict['last_consolidated'].isoformat()
+                update_data['memory_profile'] = memory_profile_dict
 
             if update_data:
                 response = self.supabase_service.table('profiles').update(update_data).eq('id', user_id).execute()
@@ -139,7 +155,7 @@ class UserService:
             return {
                 "success": True,
                 "message": "记忆整合成功",
-                "memory_profile": memory_profile.dict()
+                "memory_profile": serialize_datetime_for_json(memory_profile.dict())
             }
             
         except Exception as e:
@@ -157,7 +173,7 @@ class UserService:
             
             return {
                 "success": True,
-                "memory_profile": memory_profile.dict()
+                "memory_profile": serialize_datetime_for_json(memory_profile.dict())
             }
             
         except Exception as e:
@@ -223,7 +239,7 @@ class UserService:
                 return {
                     "success": True,
                     "message": "记忆自动整合完成",
-                    "memory_profile": memory_profile.dict()
+                    "memory_profile": serialize_datetime_for_json(memory_profile.dict())
                 }
             else:
                 return {
