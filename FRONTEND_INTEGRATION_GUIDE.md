@@ -26,6 +26,11 @@ Authorization: Bearer token  // user_id通过Authorization头传递
 {
   "message": "用户问题"  // 注意：字段名改为message
 }
+
+// 会话管理策略：
+// 1. 不传session_id -> 创建新会话
+// 2. 传"new" -> 创建新会话（忽略任何现有会话）
+// 3. 传"continue_sessionId" -> 继续使用现有会话
 ```
 
 #### **响应格式**
@@ -179,11 +184,19 @@ class ChatApiService {
   }
 
   // 发送聊天消息
-  async sendMessage(question, userId, sessionId = null) {
+  async sendMessage(question, userId, sessionId = null, continueSession = false) {
     // 构建URL，session_id作为查询参数
-    const url = sessionId 
-      ? `${this.baseURL}/chat?session_id=${sessionId}`
-      : `${this.baseURL}/chat`;
+    let url = `${this.baseURL}/chat`;
+    
+    if (sessionId) {
+      if (continueSession) {
+        // 继续使用现有会话
+        url += `?session_id=continue_${sessionId}`;
+      } else {
+        // 创建新会话（忽略现有sessionId）
+        url += `?session_id=new`;
+      }
+    }
     
     const response = await fetch(url, {
       method: 'POST',

@@ -136,29 +136,33 @@ async def chat_endpoint(request: Request, chat_request: ChatRequest, session_id:
         chat_storage = ChatStorageService()
         memory_service = MemoryService()
         
-        # 处理会话ID
+        # 处理会话ID - 每次请求都创建新会话
         logger.info(f"收到的session_id参数: {session_id}")
         current_session_id = None
-        if session_id:
+        
+        # 检查是否有特殊标志要求使用现有会话
+        use_existing_session = False
+        if session_id and session_id.startswith("continue_"):
+            # 如果session_id以"continue_"开头，则使用现有会话
+            actual_session_id = session_id[9:]  # 移除"continue_"前缀
             try:
-                session_uuid = UUID(session_id)
+                session_uuid = UUID(actual_session_id)
                 # 验证会话是否存在且属于当前用户
                 existing_session = await chat_storage.get_session(session_uuid)
                 if existing_session and existing_session.user_id == UUID(user_id):
                     current_session_id = session_uuid
-                    logger.info(f"使用现有会话: {current_session_id}")
+                    use_existing_session = True
+                    logger.info(f"继续使用现有会话: {current_session_id}")
                 else:
-                    logger.warning(f"会话不存在或不属于当前用户: {session_id}")
-                    current_session_id = None
+                    logger.warning(f"会话不存在或不属于当前用户: {actual_session_id}")
             except ValueError:
-                logger.warning(f"无效的session_id格式: {session_id}")
+                logger.warning(f"无效的session_id格式: {actual_session_id}")
             except Exception as e:
                 logger.warning(f"验证会话失败: {e}")
-                current_session_id = None
         
-        if not current_session_id and user_id:
-            # 如果没有提供session_id或会话验证失败，创建新会话
-            logger.info(f"没有有效会话，为用户 {user_id} 创建新会话")
+        if not use_existing_session and user_id:
+            # 默认行为：创建新会话
+            logger.info(f"为用户 {user_id} 创建新会话")
             try:
                 new_session = await chat_storage.create_session(
                     ChatSessionCreate(user_id=UUID(user_id))
