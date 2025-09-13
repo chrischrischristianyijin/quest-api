@@ -2,8 +2,8 @@ from fastapi import APIRouter, HTTPException, Depends, status, UploadFile, File,
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from app.services.user_service import UserService
 from app.services.auth_service import AuthService
-from app.models.user import UserUpdate
-from typing import Dict, Any
+from app.models.user import UserUpdate, UserMemoryConsolidationRequest
+from typing import Dict, Any, Optional
 import logging
 import uuid
 import os
