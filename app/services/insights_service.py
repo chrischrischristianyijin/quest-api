@@ -108,8 +108,9 @@ class InsightsService:
             
             # 获取insight_contents数据并合并
             if insights:
-                insight_ids = [insight['id'] for insight in insights]
+                insight_ids = [str(insight['id']) for insight in insights]  # Ensure UUIDs are strings
                 logger.info(f"🔍 获取insight_contents数据，insight_ids: {insight_ids}")
+                logger.info(f"🔍 insight_ids类型: {[type(id) for id in insight_ids]}")
                 
                 try:
                     contents_response = supabase.table('insight_contents').select(
@@ -121,6 +122,9 @@ class InsightsService:
                     else:
                         contents_data = contents_response.data or []
                         logger.info(f"成功获取 {len(contents_data)} 条insight_contents")
+                        if contents_data:
+                            logger.info(f"🔍 insight_contents中的insight_id: {[content.get('insight_id') for content in contents_data]}")
+                            logger.info(f"🔍 insight_contents中的insight_id类型: {[type(content.get('insight_id')) for content in contents_data]}")
                         
                         # 创建insight_contents映射
                         contents_map = {}
@@ -132,11 +136,13 @@ class InsightsService:
                         
                         # 合并数据
                         for insight in insights:
-                            insight_id = insight['id']
+                            insight_id = str(insight['id'])  # Ensure UUID is string for comparison
                             if insight_id in contents_map:
                                 insight['insight_contents'] = [contents_map[insight_id]]
+                                logger.info(f"✅ 匹配成功: insight {insight_id} 有内容数据")
                             else:
                                 insight['insight_contents'] = []
+                                logger.info(f"❌ 未匹配: insight {insight_id} 无内容数据")
                                 
                         logger.info(f"✅ 成功合并insight_contents数据")
                         
@@ -253,8 +259,9 @@ class InsightsService:
             
             # 获取insight_contents数据并合并
             if insights:
-                insight_ids = [insight['id'] for insight in insights]
+                insight_ids = [str(insight['id']) for insight in insights]  # Ensure UUIDs are strings
                 logger.info(f"🔍 获取insight_contents数据，insight_ids: {insight_ids}")
+                logger.info(f"🔍 insight_ids类型: {[type(id) for id in insight_ids]}")
                 
                 try:
                     contents_response = supabase.table('insight_contents').select(
@@ -266,6 +273,9 @@ class InsightsService:
                     else:
                         contents_data = contents_response.data or []
                         logger.info(f"成功获取 {len(contents_data)} 条insight_contents")
+                        if contents_data:
+                            logger.info(f"🔍 insight_contents中的insight_id: {[content.get('insight_id') for content in contents_data]}")
+                            logger.info(f"🔍 insight_contents中的insight_id类型: {[type(content.get('insight_id')) for content in contents_data]}")
                         
                         # 创建insight_contents映射
                         contents_map = {}
@@ -277,11 +287,13 @@ class InsightsService:
                         
                         # 合并数据
                         for insight in insights:
-                            insight_id = insight['id']
+                            insight_id = str(insight['id'])  # Ensure UUID is string for comparison
                             if insight_id in contents_map:
                                 insight['insight_contents'] = [contents_map[insight_id]]
+                                logger.info(f"✅ 匹配成功: insight {insight_id} 有内容数据")
                             else:
                                 insight['insight_contents'] = []
+                                logger.info(f"❌ 未匹配: insight {insight_id} 无内容数据")
                                 
                         logger.info(f"✅ 成功合并insight_contents数据")
                         
@@ -382,8 +394,9 @@ class InsightsService:
             
             # 获取insight_contents数据并合并
             if insights:
-                insight_ids = [insight['id'] for insight in insights]
+                insight_ids = [str(insight['id']) for insight in insights]  # Ensure UUIDs are strings
                 logger.info(f"🔍 获取insight_contents数据，insight_ids: {insight_ids}")
+                logger.info(f"🔍 insight_ids类型: {[type(id) for id in insight_ids]}")
                 
                 try:
                     contents_response = supabase.table('insight_contents').select(
@@ -395,6 +408,9 @@ class InsightsService:
                     else:
                         contents_data = contents_response.data or []
                         logger.info(f"成功获取 {len(contents_data)} 条insight_contents")
+                        if contents_data:
+                            logger.info(f"🔍 insight_contents中的insight_id: {[content.get('insight_id') for content in contents_data]}")
+                            logger.info(f"🔍 insight_contents中的insight_id类型: {[type(content.get('insight_id')) for content in contents_data]}")
                         
                         # 创建insight_contents映射
                         contents_map = {}
@@ -406,11 +422,13 @@ class InsightsService:
                         
                         # 合并数据
                         for insight in insights:
-                            insight_id = insight['id']
+                            insight_id = str(insight['id'])  # Ensure UUID is string for comparison
                             if insight_id in contents_map:
                                 insight['insight_contents'] = [contents_map[insight_id]]
+                                logger.info(f"✅ 匹配成功: insight {insight_id} 有内容数据")
                             else:
                                 insight['insight_contents'] = []
+                                logger.info(f"❌ 未匹配: insight {insight_id} 无内容数据")
                                 
                         logger.info(f"✅ 成功合并insight_contents数据")
                         
