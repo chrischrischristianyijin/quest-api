@@ -30,11 +30,12 @@ Authorization: Bearer token  // user_id通过Authorization头传递
 
 #### **响应格式**
 ```javascript
-// 流式响应保持不变
-// 会话ID在响应头中返回
-// 响应头: X-Session-ID: uuid
-// 流式数据: data: {"type": "content", "content": "..."}
-// 结束标记: data: {"type": "done", "session_id": "uuid", ...}
+// 流式响应格式
+// 1. 会话信息: data: {"type": "session_info", "session_id": "uuid", "request_id": "xxx"}
+// 2. 内容流: data: {"type": "content", "content": "..."}
+// 3. 结束标记: data: {"type": "done", "session_id": "uuid", ...}
+
+// 注意：会话ID现在在流式数据中返回，而不是响应头
 ```
 
 ### 2. 新增会话管理接口
@@ -195,12 +196,35 @@ class ChatApiService {
       })
     });
 
-    // 获取会话ID从响应头
-    const sessionIdFromResponse = response.headers.get('X-Session-ID');
+    // 处理流式响应
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let sessionIdFromStream = null;
+    
+    // 读取第一个数据块获取会话ID
+    const { value } = await reader.read();
+    const chunk = decoder.decode(value);
+    
+    if (chunk.includes('session_info')) {
+      const lines = chunk.split('\n');
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const data = JSON.parse(line.slice(6));
+            if (data.type === 'session_info') {
+              sessionIdFromStream = data.session_id;
+              break;
+            }
+          } catch (e) {
+            // 忽略解析错误
+          }
+        }
+      }
+    }
     
     return {
       stream: response.body,
-      sessionId: sessionIdFromResponse
+      sessionId: sessionIdFromStream
     };
   }
 

@@ -353,6 +353,11 @@ async def chat_endpoint(request: Request, chat_request: ChatRequest, session_id:
             }
             if current_session_id:
                 headers["X-Session-ID"] = str(current_session_id)
+                logger.info(f"设置响应头 X-Session-ID: {current_session_id}")
+            else:
+                logger.warning("没有会话ID，无法设置响应头")
+            
+            logger.info(f"流式响应头: {headers}")
             
             return StreamingResponse(
                 stream_chat_response(
@@ -434,6 +439,14 @@ async def stream_chat_response(
 ) -> AsyncGenerator[str, None]:
     """流式聊天响应生成器"""
     try:
+        # 首先发送会话ID信息
+        if session_id:
+            session_info = {
+                'type': 'session_info',
+                'session_id': str(session_id),
+                'request_id': request_id
+            }
+            yield f"data: {json.dumps(session_info, ensure_ascii=False)}\n\n"
         # OpenAI API配置
         api_key = os.getenv('OPENAI_API_KEY')
         base_url = os.getenv('OPENAI_BASE_URL', 'https://api.openai.com/v1')
