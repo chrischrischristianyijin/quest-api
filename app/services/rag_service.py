@@ -264,13 +264,15 @@ class RAGService:
             return []
     
     async def _get_insights_info(self, insight_ids: List[str]) -> Dict[str, Dict[str, Any]]:
-        """批量获取insight信息"""
+        """批量获取insight信息，使用insights_with_summary视图"""
         try:
             if not insight_ids:
                 return {}
             
-            # 构建查询条件
-            query = self.supabase.table('insights').select('id, title, url, summary')
+            # 使用新创建的视图查询，直接获取summary字段
+            query = self.supabase.table('insights_with_summary').select(
+                'id, title, url, description, summary'
+            )
             
             # 使用in_查询来批量获取
             response = query.in_('id', insight_ids).execute()
@@ -282,7 +284,7 @@ class RAGService:
                     insights_info[insight['id']] = {
                         'title': insight.get('title'),
                         'url': insight.get('url'),
-                        'summary': insight.get('summary')
+                        'summary': insight.get('summary') or insight.get('description')  # 优先使用summary，fallback到description
                     }
                 
                 logger.debug(f"成功获取 {len(insights_info)} 个insight的信息")
@@ -293,6 +295,43 @@ class RAGService:
                 
         except Exception as e:
             logger.error(f"获取insight信息失败: {e}")
+            # 如果视图查询失败，回退到原来的JOIN查询方式
+            logger.info("尝试使用原始JOIN查询作为fallback")
+            return await self._get_insights_info_fallback(insight_ids)
+    
+    async def _get_insights_info_fallback(self, insight_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+        """fallback方法：使用原始JOIN查询"""
+        try:
+            if not insight_ids:
+                return {}
+            
+            # 原始JOIN查询作为fallback
+            query = self.supabase.table('insights').select(
+                'id, title, url, description, insight_contents(summary)'
+            )
+            
+            response = query.in_('id', insight_ids).execute()
+            
+            if response.data:
+                insights_info = {}
+                for insight in response.data:
+                    summary = None
+                    if insight.get('insight_contents') and len(insight['insight_contents']) > 0:
+                        summary = insight['insight_contents'][0].get('summary')
+                    
+                    insights_info[insight['id']] = {
+                        'title': insight.get('title'),
+                        'url': insight.get('url'),
+                        'summary': summary or insight.get('description')
+                    }
+                
+                logger.debug(f"Fallback查询成功获取 {len(insights_info)} 个insight的信息")
+                return insights_info
+            else:
+                return {}
+                
+        except Exception as e:
+            logger.error(f"Fallback查询也失败: {e}")
             return {}
     
     def format_context(self, chunks: List[RAGChunk], max_tokens: int = 4000) -> RAGContext:

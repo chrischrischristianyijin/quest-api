@@ -251,6 +251,13 @@ async def chat_endpoint(request: Request, chat_request: ChatRequest, session_id:
                 # 转换RAG分块格式
                 rag_chunk_infos = []
                 for chunk in rag_chunks:
+                    # 确保created_at是字符串格式
+                    created_at_str = chunk.created_at
+                    if hasattr(created_at_str, 'isoformat'):
+                        created_at_str = created_at_str.isoformat()
+                    elif not isinstance(created_at_str, str):
+                        created_at_str = str(created_at_str)
+                    
                     rag_chunk_infos.append(RAGChunkInfo(
                         id=str(chunk.id),
                         insight_id=str(chunk.insight_id),
@@ -258,7 +265,7 @@ async def chat_endpoint(request: Request, chat_request: ChatRequest, session_id:
                         chunk_text=chunk.chunk_text,
                         chunk_size=chunk.chunk_size,
                         score=chunk.score,
-                        created_at=chunk.created_at
+                        created_at=created_at_str
                     ))
                 
                 await chat_storage.create_rag_context(
@@ -299,7 +306,7 @@ async def chat_endpoint(request: Request, chat_request: ChatRequest, session_id:
             return StreamingResponse(
                 stream_chat_response(
                     messages, request_id, start_time, rag_chunks, 
-                    current_session_id, chat_storage, memory_service
+                    current_session_id, chat_storage, memory_service, user_id
                 ),
                 media_type="text/event-stream",
                 headers={
@@ -316,7 +323,7 @@ async def chat_endpoint(request: Request, chat_request: ChatRequest, session_id:
             logger.info(f"聊天请求完成 - Request ID: {request_id}, Latency: {latency_ms}ms")
             
             # 异步触发记忆整合（不阻塞响应）
-            if session_id:
+            if current_session_id and user_id:
                 try:
                     user_service = UserService()
                     # 在后台任务中执行记忆整合
@@ -324,7 +331,7 @@ async def chat_endpoint(request: Request, chat_request: ChatRequest, session_id:
                     asyncio.create_task(
                         user_service.auto_consolidate_memories(
                             user_id=user_id, 
-                            session_id=str(session_id)
+                            session_id=str(current_session_id)
                         )
                     )
                 except Exception as e:
@@ -369,7 +376,8 @@ async def stream_chat_response(
     rag_chunks: list,
     session_id: Optional[UUID] = None,
     chat_storage: Optional[ChatStorageService] = None,
-    memory_service: Optional[MemoryService] = None
+    memory_service: Optional[MemoryService] = None,
+    user_id: Optional[str] = None
 ) -> AsyncGenerator[str, None]:
     """流式聊天响应生成器"""
     try:
@@ -425,7 +433,7 @@ async def stream_chat_response(
                             }
                             
                             # 异步触发记忆整合（不阻塞响应）
-                            if session_id:
+                            if session_id and user_id:
                                 try:
                                     user_service = UserService()
                                     # 在后台任务中执行记忆整合

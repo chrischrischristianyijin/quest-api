@@ -93,3 +93,4 @@ async def evaluate_memory_quality(self, memory: ChatMemory) -> float:
 - 存储成本：整合可减少50-70%的存储空间
 - 检索性能：整合后检索速度提升30-50%
 
+
