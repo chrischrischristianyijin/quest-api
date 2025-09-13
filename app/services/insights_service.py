@@ -79,9 +79,9 @@ class InsightsService:
             
             logger.info(f"查询用户 {query_user_id} 的insights，当前用户: {user_id}, stack_id: {stack_id}")
             
-            # 构建查询 - 包含JSONB tags字段和stack_id，以及summary字段
+            # 构建查询 - 包含JSONB tags字段和stack_id
             query = supabase.table('insights').select(
-                'id, title, description, url, image_url, created_at, updated_at, tags, stack_id, insight_contents(summary, thought)'
+                'id, title, description, url, image_url, created_at, updated_at, tags, stack_id'
             ).eq('user_id', query_user_id)
             
             # 添加stack_id筛选条件
@@ -105,6 +105,46 @@ class InsightsService:
             
             insights = response.data or []
             logger.info(f"成功获取 {len(insights)} 条insights")
+            
+            # 获取insight_contents数据并合并
+            if insights:
+                insight_ids = [insight['id'] for insight in insights]
+                logger.info(f"🔍 获取insight_contents数据，insight_ids: {insight_ids}")
+                
+                try:
+                    contents_response = supabase.table('insight_contents').select(
+                        'insight_id, summary, thought'
+                    ).in_('insight_id', insight_ids).execute()
+                    
+                    if hasattr(contents_response, 'error') and contents_response.error:
+                        logger.error(f"获取insight_contents失败: {contents_response.error}")
+                    else:
+                        contents_data = contents_response.data or []
+                        logger.info(f"成功获取 {len(contents_data)} 条insight_contents")
+                        
+                        # 创建insight_contents映射
+                        contents_map = {}
+                        for content in contents_data:
+                            contents_map[content['insight_id']] = {
+                                'summary': content.get('summary'),
+                                'thought': content.get('thought')
+                            }
+                        
+                        # 合并数据
+                        for insight in insights:
+                            insight_id = insight['id']
+                            if insight_id in contents_map:
+                                insight['insight_contents'] = [contents_map[insight_id]]
+                            else:
+                                insight['insight_contents'] = []
+                                
+                        logger.info(f"✅ 成功合并insight_contents数据")
+                        
+                except Exception as e:
+                    logger.error(f"获取insight_contents时出错: {e}")
+                    # 如果获取失败，为每个insight添加空的insight_contents
+                    for insight in insights:
+                        insight['insight_contents'] = []
             
             # 获取总数
             count_query = supabase.table('insights').select('id', count='exact').eq('user_id', query_user_id)
@@ -185,9 +225,9 @@ class InsightsService:
             
             logger.info(f"查询用户 {query_user_id} 的所有insights，当前用户: {user_id}")
             
-            # 构建查询 - 包含JSONB tags字段和stack_id，以及summary字段
+            # 构建查询 - 包含JSONB tags字段和stack_id
             query = supabase.table('insights').select(
-                'id, title, description, url, image_url, created_at, updated_at, tags, stack_id, insight_contents(summary, thought)'
+                'id, title, description, url, image_url, created_at, updated_at, tags, stack_id'
             ).eq('user_id', query_user_id)
             
             # 添加搜索条件
@@ -210,6 +250,46 @@ class InsightsService:
             
             insights = response.data or []
             logger.info(f"成功获取 {len(insights)} 条insights")
+            
+            # 获取insight_contents数据并合并
+            if insights:
+                insight_ids = [insight['id'] for insight in insights]
+                logger.info(f"🔍 获取insight_contents数据，insight_ids: {insight_ids}")
+                
+                try:
+                    contents_response = supabase.table('insight_contents').select(
+                        'insight_id, summary, thought'
+                    ).in_('insight_id', insight_ids).execute()
+                    
+                    if hasattr(contents_response, 'error') and contents_response.error:
+                        logger.error(f"获取insight_contents失败: {contents_response.error}")
+                    else:
+                        contents_data = contents_response.data or []
+                        logger.info(f"成功获取 {len(contents_data)} 条insight_contents")
+                        
+                        # 创建insight_contents映射
+                        contents_map = {}
+                        for content in contents_data:
+                            contents_map[content['insight_id']] = {
+                                'summary': content.get('summary'),
+                                'thought': content.get('thought')
+                            }
+                        
+                        # 合并数据
+                        for insight in insights:
+                            insight_id = insight['id']
+                            if insight_id in contents_map:
+                                insight['insight_contents'] = [contents_map[insight_id]]
+                            else:
+                                insight['insight_contents'] = []
+                                
+                        logger.info(f"✅ 成功合并insight_contents数据")
+                        
+                except Exception as e:
+                    logger.error(f"获取insight_contents时出错: {e}")
+                    # 如果获取失败，为每个insight添加空的insight_contents
+                    for insight in insights:
+                        insight['insight_contents'] = []
             
             # 优化：如果 insights 数量很大，考虑分批处理标签
             if len(insights) > 100:
@@ -267,9 +347,9 @@ class InsightsService:
             
             logger.info(f"增量查询用户 {user_id} 的insights，since={since}, etag={etag}")
             
-            # 构建基础查询 - 包含JSONB tags字段，以及summary字段
+            # 构建基础查询 - 包含JSONB tags字段
             query = supabase.table('insights').select(
-                'id, title, description, url, image_url, created_at, updated_at, tags, insight_contents(summary, thought)'
+                'id, title, description, url, image_url, created_at, updated_at, tags'
             ).eq('user_id', str(user_id))
             
             # 时间过滤：只获取指定时间之后的数据
@@ -299,6 +379,46 @@ class InsightsService:
             
             insights = response.data or []
             logger.info(f"增量查询获取 {len(insights)} 条insights")
+            
+            # 获取insight_contents数据并合并
+            if insights:
+                insight_ids = [insight['id'] for insight in insights]
+                logger.info(f"🔍 获取insight_contents数据，insight_ids: {insight_ids}")
+                
+                try:
+                    contents_response = supabase.table('insight_contents').select(
+                        'insight_id, summary, thought'
+                    ).in_('insight_id', insight_ids).execute()
+                    
+                    if hasattr(contents_response, 'error') and contents_response.error:
+                        logger.error(f"获取insight_contents失败: {contents_response.error}")
+                    else:
+                        contents_data = contents_response.data or []
+                        logger.info(f"成功获取 {len(contents_data)} 条insight_contents")
+                        
+                        # 创建insight_contents映射
+                        contents_map = {}
+                        for content in contents_data:
+                            contents_map[content['insight_id']] = {
+                                'summary': content.get('summary'),
+                                'thought': content.get('thought')
+                            }
+                        
+                        # 合并数据
+                        for insight in insights:
+                            insight_id = insight['id']
+                            if insight_id in contents_map:
+                                insight['insight_contents'] = [contents_map[insight_id]]
+                            else:
+                                insight['insight_contents'] = []
+                                
+                        logger.info(f"✅ 成功合并insight_contents数据")
+                        
+                except Exception as e:
+                    logger.error(f"获取insight_contents时出错: {e}")
+                    # 如果获取失败，为每个insight添加空的insight_contents
+                    for insight in insights:
+                        insight['insight_contents'] = []
             
             # 生成数据指纹用于 ETag 缓存
             data_hash = _generate_etag(insights)
