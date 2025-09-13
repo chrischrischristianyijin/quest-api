@@ -244,7 +244,10 @@ async def chat_endpoint(request: Request, chat_request: ChatRequest, session_id:
             context_text = rag_context.context_text
             rag_chunks = rag_context.chunks
             if context_text:
+                system_prompt += "【Context from your insights】\n"
                 system_prompt += context_text
+                system_prompt += "\n"
+                logger.info(f"RAG上下文已添加到系统提示，长度: {len(context_text)} 字符")
             else:
                 logger.info("RAG检索未找到相关insights")
                 system_prompt += "No relevant insights found for this query."
@@ -255,8 +258,6 @@ async def chat_endpoint(request: Request, chat_request: ChatRequest, session_id:
             for memory in relevant_memories:
                 system_prompt += f"- {memory.content}\n"
             system_prompt += "\n"
-        
-        system_prompt += "【Context from your insights】\n"
         
         # 异步存储用户消息（不阻塞响应）
         async def store_user_message():
@@ -325,11 +326,42 @@ async def chat_endpoint(request: Request, chat_request: ChatRequest, session_id:
             lambda task: asyncio.create_task(store_rag_context(task.result())) if task.result() else None
         )
         
+        # 获取历史对话上下文
+        conversation_history = []
+        if current_session_id:
+            try:
+                recent_messages = await chat_storage.get_session_messages(current_session_id, limit=10)
+                # 构建对话历史（排除当前消息）
+                for msg in recent_messages:
+                    conversation_history.append({
+                        "role": msg.role.value,
+                        "content": msg.content
+                    })
+                logger.info(f"获取到 {len(conversation_history)} 条历史消息")
+            except Exception as e:
+                logger.warning(f"获取历史消息失败: {e}")
+        
         # 构建完整的消息列表
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_question}
-        ]
+        messages = [{"role": "system", "content": system_prompt}]
+        
+        # 添加历史对话（限制token数量）
+        history_tokens = 0
+        max_history_tokens = 3000  # 为历史对话预留的token数
+        
+        for msg in reversed(conversation_history):  # 从最新开始
+            msg_tokens = estimate_tokens(msg["content"])
+            if history_tokens + msg_tokens > max_history_tokens:
+                logger.info(f"历史对话token限制 ({max_history_tokens})，停止添加更多历史消息")
+                break
+            messages.append(msg)
+            history_tokens += msg_tokens
+        
+        # 添加当前用户消息
+        messages.append({"role": "user", "content": user_question})
+        
+        # 记录系统提示信息
+        logger.info(f"系统提示总长度: {len(system_prompt)} 字符")
+        logger.info(f"总消息数量: {len(messages)} (包含 {len(conversation_history)} 条历史消息)")
         
         # 检查总token数
         total_tokens = sum(estimate_tokens(msg["content"]) for msg in messages)
