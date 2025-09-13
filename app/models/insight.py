@@ -3,6 +3,13 @@ from typing import List, Optional, Dict, Any, Union
 from datetime import datetime
 from uuid import UUID
 
+class InsightContentBrief(BaseModel):
+    """Brief insight content model for response"""
+    summary: Optional[str] = None
+    thought: Optional[str] = None
+    url: Optional[str] = None
+    extracted_at: Optional[datetime] = None
+
 class InsightBase(BaseModel):
     """Insight基础模型"""
     title: Optional[str] = Field(None, min_length=1, max_length=200, description="见解标题")
@@ -45,6 +52,8 @@ class InsightResponse(InsightBase):
     created_at: datetime
     updated_at: datetime
     tags: List[dict] = Field(default_factory=list, description="标签信息列表")
+    # NEW: include merged contents so FastAPI doesn't strip it
+    insight_contents: List[InsightContentBrief] = Field(default_factory=list, description="AI生成的内容摘要和想法")
 
 class InsightListResponse(BaseModel):
     """Insight列表响应模型"""

@@ -186,7 +186,9 @@ class InsightsService:
                     "created_at": insight['created_at'],
                     "updated_at": insight['updated_at'],
                     "stack_id": insight.get('stack_id'),  # 包含stack_id字段
-                    "tags": insight_tags  # 🚀 零延迟标签数据！
+                    "tags": insight_tags,  # 🚀 零延迟标签数据！
+                    # NEW: pass through what you previously merged
+                    "insight_contents": insight.get('insight_contents', [])
                 }
                 insight_responses.append(insight_response)
             
@@ -331,7 +333,9 @@ class InsightsService:
                     "created_at": insight['created_at'],
                     "updated_at": insight['updated_at'],
                     "stack_id": insight.get('stack_id'),  # 包含stack_id字段
-                    "tags": insight_tags  # 🚀 零延迟标签数据！
+                    "tags": insight_tags,  # 🚀 零延迟标签数据！
+                    # NEW: pass through what you previously merged
+                    "insight_contents": insight.get('insight_contents', [])
                 }
                 insight_responses.append(insight_response)
             
@@ -473,7 +477,9 @@ class InsightsService:
                     "image_url": insight.get('image_url'),
                     "created_at": insight['created_at'],
                     "updated_at": insight['updated_at'],
-                    "tags": insight_tags  # 🚀 零延迟标签数据！
+                    "tags": insight_tags,  # 🚀 零延迟标签数据！
+                    # NEW: pass through what you previously merged
+                    "insight_contents": insight.get('insight_contents', [])
                 }
                 insight_responses.append(insight_response)
             
