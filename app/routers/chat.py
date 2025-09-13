@@ -137,6 +137,7 @@ async def chat_endpoint(request: Request, chat_request: ChatRequest, session_id:
         memory_service = MemoryService()
         
         # 处理会话ID
+        logger.info(f"收到的session_id参数: {session_id}")
         current_session_id = None
         if session_id:
             try:
@@ -157,6 +158,7 @@ async def chat_endpoint(request: Request, chat_request: ChatRequest, session_id:
         
         if not current_session_id and user_id:
             # 如果没有提供session_id或会话验证失败，创建新会话
+            logger.info(f"没有有效会话，为用户 {user_id} 创建新会话")
             try:
                 new_session = await chat_storage.create_session(
                     ChatSessionCreate(user_id=UUID(user_id))
