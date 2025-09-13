@@ -27,6 +27,10 @@ class RAGChunk(BaseModel):
     chunk_size: int = Field(..., description="分块大小")
     score: float = Field(..., description="相似度分数")
     created_at: datetime = Field(..., description="创建时间")
+    # 新增insight相关信息
+    insight_title: Optional[str] = Field(None, description="insight标题")
+    insight_url: Optional[str] = Field(None, description="insight URL")
+    insight_summary: Optional[str] = Field(None, description="insight摘要")
 
 class RAGContext(BaseModel):
     """RAG上下文信息"""

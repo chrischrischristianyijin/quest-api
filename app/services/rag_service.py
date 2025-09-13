@@ -177,7 +177,7 @@ class RAGService:
                     # 调试：显示第一个结果的结构
                     if response.data:
                         logger.debug(f"第一个结果的结构: {response.data[0]}")
-                    return self._process_hnsw_results(response.data, k)
+                    return await self._process_hnsw_results(response.data, k)
                 else:
                     logger.info("HNSW向量搜索没有找到结果")
                     return []
@@ -190,7 +190,7 @@ class RAGService:
             logger.error(f"检索失败: {e}")
             raise
     
-    def _process_hnsw_results(self, results: List[Dict], k: int) -> List[RAGChunk]:
+    async def _process_hnsw_results(self, results: List[Dict], k: int) -> List[RAGChunk]:
         """处理HNSW搜索返回的结果"""
         try:
             chunks_with_scores = []
@@ -239,7 +239,21 @@ class RAGService:
                     if len(filtered_chunks) >= k:
                         break
             
+            # 获取insight信息并填充到chunks中
             if filtered_chunks:
+                # 获取所有唯一的insight_id
+                unique_insight_ids = list(set(str(chunk.insight_id) for chunk in filtered_chunks))
+                
+                # 批量获取insight信息
+                insights_info = await self._get_insights_info(unique_insight_ids)
+                
+                # 为每个chunk填充insight信息
+                for chunk in filtered_chunks:
+                    insight_info = insights_info.get(str(chunk.insight_id), {})
+                    chunk.insight_title = insight_info.get('title')
+                    chunk.insight_url = insight_info.get('url')
+                    chunk.insight_summary = insight_info.get('summary')
+                
                 avg_score = sum(chunk.score for chunk in filtered_chunks) / len(filtered_chunks)
                 logger.info(f"HNSW检索到 {len(filtered_chunks)} 个相关分块（平均相似度: {avg_score:.3f}）")
             
@@ -248,6 +262,38 @@ class RAGService:
         except Exception as e:
             logger.error(f"处理HNSW结果失败: {e}")
             return []
+    
+    async def _get_insights_info(self, insight_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+        """批量获取insight信息"""
+        try:
+            if not insight_ids:
+                return {}
+            
+            # 构建查询条件
+            query = self.supabase.table('insights').select('id, title, url, summary')
+            
+            # 使用in_查询来批量获取
+            response = query.in_('id', insight_ids).execute()
+            
+            if response.data:
+                # 构建insight_id到信息的映射
+                insights_info = {}
+                for insight in response.data:
+                    insights_info[insight['id']] = {
+                        'title': insight.get('title'),
+                        'url': insight.get('url'),
+                        'summary': insight.get('summary')
+                    }
+                
+                logger.debug(f"成功获取 {len(insights_info)} 个insight的信息")
+                return insights_info
+            else:
+                logger.warning("未找到任何insight信息")
+                return {}
+                
+        except Exception as e:
+            logger.error(f"获取insight信息失败: {e}")
+            return {}
     
     def format_context(self, chunks: List[RAGChunk], max_tokens: int = 4000) -> RAGContext:
         """格式化检索到的分块为上下文"""
@@ -267,8 +313,22 @@ class RAGService:
             total_tokens = 0
             
             for i, chunk in enumerate(sorted_chunks):
-                # 格式化分块文本
-                chunk_text = f"【{i+1} | {chunk.score:.2f}】{chunk.chunk_text}"
+                # 构建增强的分块文本，包含insight信息
+                chunk_parts = [f"【{i+1} | {chunk.score:.2f}】{chunk.chunk_text}"]
+                
+                # 添加insight标题（如果可用）
+                if chunk.insight_title:
+                    chunk_parts.append(f"来源标题: {chunk.insight_title}")
+                
+                # 添加insight URL（如果可用）
+                if chunk.insight_url:
+                    chunk_parts.append(f"来源链接: {chunk.insight_url}")
+                
+                # 添加insight summary（如果可用且不为空）
+                if chunk.insight_summary and chunk.insight_summary.strip():
+                    chunk_parts.append(f"内容摘要: {chunk.insight_summary}")
+                
+                chunk_text = "\n".join(chunk_parts)
                 chunk_tokens = estimate_tokens(chunk_text)
                 
                 # 检查是否超过token限制

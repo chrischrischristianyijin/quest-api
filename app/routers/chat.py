@@ -8,6 +8,7 @@ from app.services.chat_storage_service import ChatStorageService
 from app.services.memory_service import MemoryService
 from app.services.user_service import UserService
 from app.models.chat_storage import ChatSessionCreate, ChatMessageCreate, ChatRAGContextCreate, RAGChunkInfo, MessageRole
+from app.utils.source_merger import merge_chunks_to_sources
 from app.utils.summarize import estimate_tokens
 from typing import Dict, Any, Optional, AsyncGenerator
 import os
@@ -329,20 +330,15 @@ async def chat_endpoint(request: Request, chat_request: ChatRequest, session_id:
                 except Exception as e:
                     logger.warning(f"触发自动记忆整合失败: {e}")
             
+            # 合并sources，按insight_id分组
+            merged_sources = merge_chunks_to_sources(rag_chunks)
+            
             return {
                 "success": True,
                 "message": "聊天响应生成成功",
                 "data": {
                     "response": response_text,
-                    "sources": [
-                        {
-                            "id": str(chunk.id),
-                            "insight_id": str(chunk.insight_id),
-                            "score": chunk.score,
-                            "index": chunk.chunk_index
-                        }
-                        for chunk in rag_chunks
-                    ],
+                    "sources": merged_sources,
                     "request_id": request_id,
                     "latency_ms": latency_ms,
                     "tokens_used": estimate_tokens(response_text)
@@ -425,15 +421,7 @@ async def stream_chat_response(
                                 'type': 'done',
                                 'request_id': request_id,
                                 'latency_ms': latency_ms,
-                                'sources': [
-                                    {
-                                        'id': str(chunk.id),
-                                        'insight_id': str(chunk.insight_id),
-                                        'score': chunk.score,
-                                        'index': chunk.chunk_index
-                                    }
-                                    for chunk in rag_chunks
-                                ]
+                                'sources': merge_chunks_to_sources(rag_chunks)
                             }
                             
                             # 异步触发记忆整合（不阻塞响应）
