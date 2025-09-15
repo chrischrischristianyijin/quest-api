@@ -22,20 +22,17 @@ logger = logging.getLogger(__name__)
 
 # 默认标签配置
 DEFAULT_TAGS = [
-    # 技术相关
-    {"name": "Technology", "color": "#3B82F6"},
-    
-    # 学习相关
-    {"name": "Learning", "color": "#84CC16"},
-    
-    # 主题分类
-    {"name": "Design", "color": "#BE185D"},
-    
-    # 工具和资源
-    {"name": "Tool", "color": "#7C2D12"},
-    
     # 项目相关
     {"name": "Project", "color": "#7C3AED"},
+    
+    # 领域相关
+    {"name": "Area", "color": "#3B82F6"},
+    
+    # 资源相关
+    {"name": "Resource", "color": "#84CC16"},
+    
+    # 归档相关
+    {"name": "Archive", "color": "#6B7280"},
 ]
 
 class AuthService:

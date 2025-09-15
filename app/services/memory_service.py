@@ -35,13 +35,15 @@ class MemoryService:
             conversation_text = self._format_conversation_for_memory_extraction(conversation_history)
             
             memory_prompt = f"""
-请从以下对话中提取重要的记忆信息。记忆应该包括：
+请从以下用户消息中提取重要的记忆信息。记忆应该包括：
 1. 用户偏好和习惯
 2. 重要的事实信息
 3. 上下文信息（如当前项目、任务等）
 4. 有价值的洞察
 
-对话内容：
+注意：只分析用户的消息，不要分析AI助手的回复。
+
+用户消息：
 {conversation_text}
 
 请以JSON格式返回记忆，每个记忆包含：
@@ -258,12 +260,15 @@ class MemoryService:
             return sorted(memories, key=lambda x: x.importance_score, reverse=True)
     
     def _format_conversation_for_memory_extraction(self, conversation_history: List[Dict[str, str]]) -> str:
-        """格式化对话历史用于记忆提取"""
+        """格式化对话历史用于记忆提取 - 只关注用户消息"""
         formatted_lines = []
         for msg in conversation_history[-10:]:  # 只取最近10条消息
             role = msg.get('role', 'unknown')
             content = msg.get('content', '')
-            formatted_lines.append(f"{role}: {content}")
+            
+            # 只提取用户的消息，忽略AI助手的回复
+            if role == 'user':
+                formatted_lines.append(f"用户: {content}")
         
         return "\n".join(formatted_lines)
     
