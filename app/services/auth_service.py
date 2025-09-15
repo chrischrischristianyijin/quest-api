@@ -40,6 +40,90 @@ class AuthService:
         self.supabase = get_supabase()
         self.supabase_service = get_supabase_service()
         self.logger = logging.getLogger(__name__)
+        
+        # 验证配置
+        self._validate_config()
+
+    def _validate_config(self):
+        """验证Supabase配置"""
+        try:
+            from app.core.config import settings
+            
+            # 检查必要的环境变量
+            required_vars = ['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY']
+            missing_vars = []
+            
+            for var in required_vars:
+                if not hasattr(settings, var) or not getattr(settings, var):
+                    missing_vars.append(var)
+            
+            if missing_vars:
+                self.logger.error(f"❌ 缺少必要的环境变量: {missing_vars}")
+                raise ValueError(f"配置错误：缺少环境变量 {missing_vars}")
+            
+            # 检查Supabase URL格式
+            supabase_url = getattr(settings, 'SUPABASE_URL', '')
+            if not supabase_url.startswith('https://'):
+                self.logger.error(f"❌ Supabase URL格式错误: {supabase_url}")
+                raise ValueError("配置错误：Supabase URL必须以https://开头")
+            
+            # 检查密钥长度
+            anon_key = getattr(settings, 'SUPABASE_ANON_KEY', '')
+            service_key = getattr(settings, 'SUPABASE_SERVICE_ROLE_KEY', '')
+            
+            if len(anon_key) < 50:
+                self.logger.error(f"❌ Supabase ANON KEY长度异常: {len(anon_key)}")
+                raise ValueError("配置错误：Supabase ANON KEY长度异常")
+            
+            if len(service_key) < 50:
+                self.logger.error(f"❌ Supabase SERVICE KEY长度异常: {len(service_key)}")
+                raise ValueError("配置错误：Supabase SERVICE KEY长度异常")
+            
+            self.logger.info(f"✅ Supabase配置验证通过")
+            self.logger.info(f"   URL: {supabase_url}")
+            self.logger.info(f"   ANON KEY长度: {len(anon_key)}")
+            self.logger.info(f"   SERVICE KEY长度: {len(service_key)}")
+            
+        except Exception as e:
+            self.logger.error(f"❌ 配置验证失败: {e}")
+            raise ValueError(f"配置验证失败: {str(e)}")
+
+    def _extract_token_from_header(self, authorization_header: str) -> str:
+        """从Authorization header中提取token"""
+        try:
+            if not authorization_header:
+                raise ValueError("Authorization header为空")
+            
+            # 支持多种格式
+            header_lower = authorization_header.lower().strip()
+            
+            # 格式1: "Bearer <token>"
+            if header_lower.startswith('bearer '):
+                token = authorization_header[7:].strip()  # 移除 "Bearer " 前缀
+                if not token:
+                    raise ValueError("Bearer token为空")
+                return token
+            
+            # 格式2: "Token <token>"
+            elif header_lower.startswith('token '):
+                token = authorization_header[6:].strip()  # 移除 "Token " 前缀
+                if not token:
+                    raise ValueError("Token为空")
+                return token
+            
+            # 格式3: 直接是token (兼容性)
+            elif ' ' not in authorization_header:
+                token = authorization_header.strip()
+                if not token:
+                    raise ValueError("Token为空")
+                return token
+            
+            else:
+                raise ValueError(f"不支持的Authorization header格式: {authorization_header[:20]}...")
+                
+        except Exception as e:
+            self.logger.error(f"❌ Token提取失败: {e}")
+            raise ValueError(f"Token提取失败: {str(e)}")
 
     def _generate_unique_username(self, email: str) -> str:
         """生成唯一用户名"""
@@ -242,13 +326,23 @@ class AuthService:
             
             if hasattr(response, 'user') and response.user:
                 access_token = response.session.access_token if hasattr(response, 'session') and response.session else None
+                refresh_token = response.session.refresh_token if hasattr(response, 'session') and response.session else None
+                
+                # 计算token过期时间
+                import time
+                expires_at = int(time.time()) + 86400  # 24小时后过期
                 
                 self.logger.info(f"✅ 用户登录成功: {user.email}")
+                self.logger.info(f"Token过期时间: {expires_at} (24小时后)")
+                
                 return {
                     "access_token": access_token,
+                    "refresh_token": refresh_token,
                     "token_type": "bearer",
                     "user_id": response.user.id,
                     "email": user.email,
+                    "expires_at": expires_at,
+                    "expires_in": 86400,
                     "session": access_token
                 }
             elif hasattr(response, 'error'):
@@ -266,6 +360,38 @@ class AuthService:
         except Exception as e:
             self.logger.error(f"登录未知错误: {str(e)}")
             raise ValueError("邮箱或密码错误")
+
+    async def refresh_token(self, refresh_token: str) -> dict:
+        """刷新访问令牌"""
+        try:
+            self.logger.info("尝试刷新访问令牌")
+            
+            response = self.supabase.auth.refresh_session(refresh_token)
+            
+            if hasattr(response, 'session') and response.session:
+                access_token = response.session.access_token
+                new_refresh_token = response.session.refresh_token
+                
+                # 计算新的过期时间
+                import time
+                expires_at = int(time.time()) + 86400
+                
+                self.logger.info("✅ 令牌刷新成功")
+                
+                return {
+                    "access_token": access_token,
+                    "refresh_token": new_refresh_token,
+                    "token_type": "bearer",
+                    "expires_at": expires_at,
+                    "expires_in": 86400
+                }
+            else:
+                self.logger.error("❌ 令牌刷新失败: 无效的refresh token")
+                raise ValueError("令牌刷新失败")
+                
+        except Exception as e:
+            self.logger.error(f"令牌刷新失败: {str(e)}")
+            raise ValueError(f"令牌刷新失败: {str(e)}")
 
     async def signout_user(self, token: str) -> dict:
         """用户登出"""
@@ -289,46 +415,34 @@ class AuthService:
         try:
             self.logger.info("尝试获取当前用户信息")
             
+            # 首先验证token基本格式
+            if not token or len(token.strip()) == 0:
+                self.logger.error("❌ Token为空")
+                raise ValueError("Token不能为空")
+            
+            token = token.strip()
+            self.logger.info(f"Token长度: {len(token)}, 前缀: {token[:20]}...")
+            
             # 检查是否是Google登录生成的临时令牌
             if token.startswith("google_existing_user_") or token.startswith("google_new_user_") or token.startswith("google_auth_token_"):
                 self.logger.info("检测到Google登录令牌")
                 
-                # 解析令牌格式：google_existing_user_{user_id}_{uuid}
-                # 更安全的解析方法：从后往前分割
-                if token.startswith("google_existing_user_"):
-                    # 移除前缀 "google_existing_user_"
-                    remaining = token[len("google_existing_user_"):]
-                    # 从右边分割最后一个 _ 来分离uuid
-                    user_part_and_uuid = remaining.rsplit("_", 1)
-                    if len(user_part_and_uuid) == 2:
-                        user_id = user_part_and_uuid[0]  # 用户ID部分
-                        self.logger.info(f"从Google existing user令牌提取用户ID: {user_id}")
-                    else:
-                        user_id = remaining
-                        self.logger.info(f"从Google existing user令牌提取用户ID(无uuid): {user_id}")
-                elif token.startswith("google_new_user_"):
-                    # 移除前缀 "google_new_user_"  
-                    remaining = token[len("google_new_user_"):]
-                    user_part_and_uuid = remaining.rsplit("_", 1)
-                    if len(user_part_and_uuid) == 2:
-                        user_id = user_part_and_uuid[0]
-                        self.logger.info(f"从Google new user令牌提取用户ID: {user_id}")
-                    else:
-                        user_id = remaining
-                        self.logger.info(f"从Google new user令牌提取用户ID(无uuid): {user_id}")
-                elif token.startswith("google_auth_token_"):
-                    # 移除前缀 "google_auth_token_"
-                    remaining = token[len("google_auth_token_"):]
-                    user_part_and_uuid = remaining.rsplit("_", 1)
-                    if len(user_part_and_uuid) == 2:
-                        user_id = user_part_and_uuid[0]
-                        self.logger.info(f"从Google auth token令牌提取用户ID: {user_id}")
-                    else:
-                        user_id = remaining
-                        self.logger.info(f"从Google auth token令牌提取用户ID(无uuid): {user_id}")
-                else:
-                    self.logger.warning("未知的Google令牌格式")
-                    raise ValueError("无效的Google令牌格式")
+                # 检查token是否过期
+                if self._is_google_token_expired(token):
+                    self.logger.error(f"❌ Google token已过期: {token[:50]}...")
+                    raise ValueError("Token已过期，请重新登录")
+                
+                # 解析token信息
+                token_info = self._parse_google_token(token)
+                user_id = token_info["user_id"]
+                
+                if not user_id:
+                    self.logger.error(f"❌ 无法从Google token中提取用户ID: {token[:50]}...")
+                    raise ValueError("无效的Google token格式")
+                
+                self.logger.info(f"从Google token提取用户ID: {user_id}, 类型: {token_info['type']}")
+                
+                # 使用统一的解析结果
                 
                 if user_id:
                     
@@ -373,6 +487,69 @@ class AuthService:
                 raise ValueError("无效的Google令牌")
             
             # 对于标准Supabase令牌，使用原有逻辑
+            self.logger.info(f"尝试验证标准Supabase令牌，token长度: {len(token)}")
+            
+            # 检查是否是有效的JWT格式 (应该包含两个点分隔的三部分)
+            if '.' not in token or token.count('.') != 2:
+                self.logger.error(f"❌ Token不是有效的JWT格式，包含的点数: {token.count('.')}")
+                raise ValueError("Token格式无效：不是有效的JWT格式")
+            
+            # 检查JWT的header部分是否包含alg和typ
+            try:
+                import base64
+                import json
+                header_part = token.split('.')[0]
+                # 添加padding如果必要
+                missing_padding = len(header_part) % 4
+                if missing_padding:
+                    header_part += '=' * (4 - missing_padding)
+                
+                header_data = json.loads(base64.urlsafe_b64decode(header_part))
+                if 'alg' not in header_data or 'typ' not in header_data:
+                    self.logger.error(f"❌ JWT header缺少必要字段: {header_data}")
+                    raise ValueError("Token格式无效：JWT header格式错误")
+                
+                self.logger.info(f"✅ JWT格式验证通过，算法: {header_data.get('alg')}, 类型: {header_data.get('typ')}")
+                
+                # 检查JWT的payload部分获取过期时间
+                try:
+                    payload_part = token.split('.')[1]
+                    missing_padding = len(payload_part) % 4
+                    if missing_padding:
+                        payload_part += '=' * (4 - missing_padding)
+                    
+                    payload_data = json.loads(base64.urlsafe_b64decode(payload_part))
+                    exp_timestamp = payload_data.get('exp')
+                    
+                    if exp_timestamp:
+                        import time
+                        current_time = int(time.time())
+                        exp_time = int(exp_timestamp)
+                        time_remaining = exp_time - current_time
+                        
+                        if time_remaining <= 0:
+                            self.logger.error(f"❌ Token已过期，过期时间: {exp_time}, 当前时间: {current_time}")
+                            self.logger.error(f"❌ Token过期 {abs(time_remaining)} 秒，需要刷新或重新登录")
+                            raise ValueError("Token已过期，请使用refresh token或重新登录")
+                        elif time_remaining < 3600:  # 1小时内过期
+                            hours_remaining = time_remaining // 3600
+                            minutes_remaining = (time_remaining % 3600) // 60
+                            self.logger.warning(f"⚠️ Token即将过期，剩余时间: {hours_remaining}小时{minutes_remaining}分钟")
+                            self.logger.warning(f"⚠️ 建议前端在 {time_remaining} 秒内刷新token")
+                        else:
+                            hours_remaining = time_remaining // 3600
+                            minutes_remaining = (time_remaining % 3600) // 60
+                            self.logger.info(f"✅ Token有效，剩余时间: {hours_remaining}小时{minutes_remaining}分钟")
+                    else:
+                        self.logger.warning("⚠️ Token中没有过期时间信息，无法验证有效期")
+                        
+                except Exception as payload_error:
+                    self.logger.warning(f"⚠️ 无法解析Token过期时间: {payload_error}")
+                    # 不抛出异常，继续验证
+            except Exception as jwt_error:
+                self.logger.error(f"❌ JWT格式验证失败: {jwt_error}")
+                raise ValueError(f"Token格式无效：{str(jwt_error)}")
+            
             response = self.supabase.auth.get_user(token)
             
             if hasattr(response, 'user') and response.user:
@@ -382,8 +559,18 @@ class AuthService:
                     "email": response.user.email
                 }
             else:
-                self.logger.warning("⚠️ 获取用户信息失败: 无效的令牌")
-                raise ValueError("无效的令牌")
+                # 增强错误日志
+                error_msg = "获取用户信息失败"
+                if hasattr(response, 'error'):
+                    error_msg += f": {response.error}"
+                elif hasattr(response, 'message'):
+                    error_msg += f": {response.message}"
+                else:
+                    error_msg += ": 无效的令牌"
+                
+                self.logger.warning(f"⚠️ {error_msg}")
+                self.logger.warning(f"Token前50字符: {token[:50]}...")
+                raise ValueError(error_msg)
                 
         except SupabaseException as sube:
             self.logger.error(f"Supabase获取用户信息错误: {sube.message}")
@@ -678,8 +865,11 @@ class AuthService:
                     profile_query = self.supabase_service.table('profiles').select('*').eq('id', user_id).execute()
                     profile_data = profile_query.data[0] if profile_query.data else {}
                     
-                    # 生成临时访问令牌
-                    access_token = f"google_existing_user_{user_id}_{uuid.uuid4()}"
+                    # 生成带时间戳的访问令牌
+                    import time
+                    timestamp = int(time.time())
+                    unique_id = str(uuid.uuid4())[:8]
+                    access_token = f"google_existing_user_{user_id}_{timestamp}_{unique_id}"
                     
                     return {
                         "success": True,
@@ -945,15 +1135,64 @@ class AuthService:
     async def _create_supabase_session_for_user(self, user_id: str) -> dict:
         """为用户创建Supabase会话"""
         try:
-            # 这里可以根据需要实现会话创建逻辑
-            # 暂时返回空的访问令牌，实际应用中需要生成有效的JWT
+            # 生成带时间戳的token，便于管理和调试
+            import time
+            timestamp = int(time.time())
+            unique_id = str(uuid.uuid4())[:8]  # 缩短UUID长度
+            
+            # 创建带时间戳的token，格式: google_auth_token_{user_id}_{timestamp}_{uuid}
+            access_token = f"google_auth_token_{user_id}_{timestamp}_{unique_id}"
+            
+            self.logger.info(f"为用户 {user_id} 创建Google会话token: {access_token[:50]}...")
+            
             return {
-                "access_token": f"google_auth_token_{user_id}_{uuid.uuid4()}",
-                "token_type": "bearer"
+                "access_token": access_token,
+                "token_type": "bearer",
+                "expires_at": timestamp + 86400,  # 24小时后过期
+                "created_at": timestamp
             }
         except Exception as e:
             self.logger.error(f"创建用户会话失败: {str(e)}")
             return {"access_token": None}
+
+    def _parse_google_token(self, token: str) -> dict:
+        """解析Google token，提取用户ID和时间戳"""
+        try:
+            if token.startswith("google_existing_user_"):
+                parts = token.split("_")
+                if len(parts) >= 4:
+                    user_id = parts[3]
+                    timestamp = int(parts[4]) if len(parts) > 4 else None
+                    return {"user_id": user_id, "timestamp": timestamp, "type": "existing"}
+            elif token.startswith("google_new_user_"):
+                parts = token.split("_")
+                if len(parts) >= 4:
+                    user_id = parts[3]
+                    timestamp = int(parts[4]) if len(parts) > 4 else None
+                    return {"user_id": user_id, "timestamp": timestamp, "type": "new"}
+            elif token.startswith("google_auth_token_"):
+                parts = token.split("_")
+                if len(parts) >= 4:
+                    user_id = parts[3]
+                    timestamp = int(parts[4]) if len(parts) > 4 else None
+                    return {"user_id": user_id, "timestamp": timestamp, "type": "auth"}
+            
+            return {"user_id": None, "timestamp": None, "type": "unknown"}
+        except Exception as e:
+            self.logger.error(f"解析Google token失败: {e}")
+            return {"user_id": None, "timestamp": None, "type": "error"}
+
+    def _is_google_token_expired(self, token: str) -> bool:
+        """检查Google token是否过期（24小时）"""
+        try:
+            token_info = self._parse_google_token(token)
+            if token_info["timestamp"]:
+                import time
+                current_time = int(time.time())
+                return (current_time - token_info["timestamp"]) > 86400  # 24小时
+            return False  # 没有时间戳的token不过期
+        except Exception:
+            return False
 
     async def check_email(self, email: str) -> dict:
         """检查邮箱是否可用"""

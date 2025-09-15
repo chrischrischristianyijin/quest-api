@@ -2,13 +2,16 @@
 
 ## 📋 API端点总览
 
-### **认证接口 (10个)**
+### **认证接口 (13个)**
 - `POST /api/v1/auth/register` - 用户注册
 - `POST /api/v1/auth/signup` - 用户注册（别名）
-- `POST /api/v1/auth/login` - 用户登录
+- `POST /api/v1/auth/login` - 用户登录（增强版，包含refresh token）
+- `POST /api/v1/auth/refresh` - 刷新访问令牌（新增）
 - `POST /api/v1/auth/signout` - 用户登出
 - `POST /api/v1/auth/check-email` - 检查邮箱（query参数）
 - `GET /api/v1/auth/profile` - 获取当前用户信息
+- `GET /api/v1/auth/token-status` - 检查Token状态和剩余时间（新增）
+- `POST /api/v1/auth/debug-token` - 调试Token验证（新增）
 - `POST /api/v1/auth/forgot-password` - 发送重置密码邮件（query参数）
 - `GET /api/v1/auth/google/login` - 获取Google OAuth登录信息（占位）
 - `POST /api/v1/auth/google/callback` - Google回调（表单）
@@ -45,7 +48,7 @@
 - `GET /` - API根路径
 - `GET /health` - 健康检查
 
-**总计：31个API端点**
+**总计：34个API端点**
 
 ---
 
@@ -98,7 +101,7 @@ Authorization: Bearer {token}
 }
 ```
 
-### 用户登录
+### 用户登录（增强版）
 ```http
 POST /api/v1/auth/login
 Content-Type: application/json
@@ -116,10 +119,89 @@ Content-Type: application/json
   "message": "登录成功",
   "data": {
     "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "refresh_token": "refresh_token_here",
     "token_type": "bearer",
     "user_id": "550e8400-e29b-41d4-a716-446655440000",
     "email": "user@example.com",
+    "expires_at": 1703123456,
+    "expires_in": 86400,
     "session": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+  }
+}
+```
+
+### 刷新访问令牌
+```http
+POST /api/v1/auth/refresh
+Content-Type: application/x-www-form-urlencoded
+
+refresh_token=your_refresh_token_here
+```
+
+**响应示例：**
+```json
+{
+  "success": true,
+  "message": "令牌刷新成功",
+  "data": {
+    "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "refresh_token": "new_refresh_token_here",
+    "token_type": "bearer",
+    "expires_at": 1703123456,
+    "expires_in": 3600
+  }
+}
+```
+
+### 检查Token状态
+```http
+GET /api/v1/auth/token-status
+Authorization: Bearer {access_token}
+```
+
+**响应示例：**
+```json
+{
+  "success": true,
+  "data": {
+    "token_length": 200,
+    "token_prefix": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "is_google_token": false,
+    "is_jwt_format": true,
+    "expires_at": 1703123456,
+    "expires_at_readable": "2023-12-21 15:30:56",
+    "time_remaining": 1800,
+    "is_expired": false,
+    "hours_remaining": 0,
+    "minutes_remaining": 30,
+    "validation_status": "success",
+    "user_id": "550e8400-e29b-41d4-a716-446655440000",
+    "user_email": "user@example.com"
+  }
+}
+```
+
+### 调试Token验证
+```http
+POST /api/v1/auth/debug-token
+Authorization: Bearer {access_token}
+```
+
+**响应示例：**
+```json
+{
+  "success": true,
+  "data": {
+    "raw_header": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "header_length": 200,
+    "has_authorization_header": true,
+    "token_length": 194,
+    "token_prefix": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "is_google_token": false,
+    "is_jwt_format": true,
+    "validation_status": "success",
+    "user_id": "550e8400-e29b-41d4-a716-446655440000",
+    "user_email": "user@example.com"
   }
 }
 ```
