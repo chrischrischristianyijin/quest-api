@@ -99,22 +99,24 @@ async def get_email_preferences(
         logger.info(f"🔐 EMAIL API: Retrieved preferences: {preferences}")
         
         if not preferences:
-            logger.info(f"🔐 EMAIL API: No preferences found, creating default for user: {user_id}")
-            # Create default preferences for new user
-            success = await repo.create_default_email_preferences(user_id)
-            logger.info(f"🔐 EMAIL API: Create default preferences result: {success}")
+            logger.info(f"🔐 EMAIL API: No preferences found, returning default preferences for user: {user_id}")
             
-            if not success:
-                logger.error(f"🔐 EMAIL API: ❌ Failed to create default preferences for user: {user_id}")
-                raise HTTPException(status_code=500, detail="Failed to create default preferences")
+            # Return default preferences without creating them in the database
+            # This allows the frontend to work while we debug the database issue
+            default_preferences = {
+                "weekly_digest_enabled": False,  # Start with disabled by default
+                "preferred_day": 1,  # Monday
+                "preferred_hour": 9,  # 9 AM
+                "timezone": "America/Los_Angeles",  # Default timezone
+                "no_activity_policy": "skip"  # Skip if no activity
+            }
             
-            # Get the newly created preferences
-            preferences = await repo.get_user_email_preferences(user_id)
-            logger.info(f"🔐 EMAIL API: Retrieved new preferences: {preferences}")
-            
-            if not preferences:
-                logger.error(f"🔐 EMAIL API: ❌ Failed to retrieve preferences after creation for user: {user_id}")
-                raise HTTPException(status_code=500, detail="Failed to retrieve preferences after creation")
+            result = {
+                "success": True,
+                "preferences": default_preferences
+            }
+            logger.info(f"🔐 EMAIL API: ✅ Returning default preferences: {result}")
+            return result
         
         result = {
             "success": True,
@@ -126,7 +128,7 @@ async def get_email_preferences(
                 "no_activity_policy": preferences["no_activity_policy"]
             }
         }
-        logger.info(f"🔐 EMAIL API: ✅ Returning preferences: {result}")
+        logger.info(f"🔐 EMAIL API: ✅ Returning stored preferences: {result}")
         return result
         
     except HTTPException:
