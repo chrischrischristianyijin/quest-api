@@ -97,7 +97,7 @@ services:
         value: 0.4  # 适中的字母数字比例要求
       # 文本分块器配置 - 优化为RAG最佳实践 (500-1000 tokens)
       - key: CHUNKER_ENABLED
-        value: true
+        value: false
       - key: CHUNKER_CHUNK_SIZE
         value: 2000  # 字符数，约500-750 tokens (1 token ≈ 2.5-4 字符)
       - key: CHUNKER_CHUNK_OVERLAP
@@ -111,7 +111,7 @@ services:
         value: true
       # OpenAI Embedding 配置
       - key: EMBEDDING_ENABLED
-        value: true
+        value: false
       - key: OPENAI_API_KEY
         value: your_openai_api_key
       - key: OPENAI_BASE_URL
