@@ -231,16 +231,15 @@ async def preview_digest(
         
         insights, stacks = await repo.get_user_activity(user_id, start_utc, end_utc)
         
-        # Generate content
-        content_generator = DigestContentGenerator()
-        payload = content_generator.build_user_digest_payload(
-            user_data, insights, stacks, user_prefs["no_activity_policy"]
-        )
+        # Generate content using the same working service as test email
+        from app.services.digest_content import DigestContentService
+        content_service = DigestContentService()
+        payload = await content_service.build_user_digest_payload(user_data, user_prefs)
         
-        # Render email content
-        from ...services.digest_job import DigestJob
-        job = DigestJob(repo)
-        render_result = await job._render_email_content(payload)
+        # Render email content using the same working service as test email
+        from app.services.digest_job import DigestJobService
+        job_service = DigestJobService()
+        render_result = await job_service._render_email_content(payload)
         
         if not render_result["success"]:
             raise HTTPException(status_code=500, detail="Failed to render email content")
