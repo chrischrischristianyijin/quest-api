@@ -97,7 +97,15 @@ async def get_email_preferences(
     try:
         preferences = await repo.get_user_email_preferences(user_id)
         if not preferences:
-            raise HTTPException(status_code=404, detail="Email preferences not found")
+            # Create default preferences for new user
+            success = await repo.create_default_email_preferences(user_id)
+            if not success:
+                raise HTTPException(status_code=500, detail="Failed to create default preferences")
+            
+            # Get the newly created preferences
+            preferences = await repo.get_user_email_preferences(user_id)
+            if not preferences:
+                raise HTTPException(status_code=500, detail="Failed to retrieve preferences after creation")
         
         return {
             "success": True,

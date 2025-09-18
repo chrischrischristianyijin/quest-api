@@ -288,6 +288,39 @@ class DigestRepo:
             logger.error(f"Error fetching email preferences for user {user_id}: {e}")
             return None
     
+    async def create_default_email_preferences(self, user_id: str) -> bool:
+        """
+        Create default email preferences for a new user.
+        
+        Args:
+            user_id: User ID
+        
+        Returns:
+            True if successful
+        """
+        try:
+            default_preferences = {
+                "user_id": user_id,
+                "weekly_digest_enabled": True,
+                "preferred_day": 1,  # Monday
+                "preferred_hour": 9,  # 9 AM
+                "timezone": "UTC",
+                "no_activity_policy": "brief"
+            }
+            
+            response = self.supabase.table("email_preferences").insert(default_preferences).execute()
+            
+            if hasattr(response, 'error') and response.error:
+                logger.error(f"Error creating default email preferences for user {user_id}: {response.error}")
+                return False
+            
+            logger.info(f"Created default email preferences for user {user_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error creating default email preferences for user {user_id}: {e}")
+            return False
+    
     async def update_user_email_preferences(
         self, 
         user_id: str, 
@@ -307,7 +340,11 @@ class DigestRepo:
             # Remove None values
             preferences = {k: v for k, v in preferences.items() if v is not None}
             
-            response = self.supabase.table("email_preferences").update(preferences).eq("user_id", user_id).execute()
+            # Add user_id to preferences for upsert
+            preferences["user_id"] = user_id
+            
+            # Use upsert to create or update preferences
+            response = self.supabase.table("email_preferences").upsert(preferences).execute()
             
             if hasattr(response, 'error') and response.error:
                 logger.error(f"Error updating email preferences for user {user_id}: {response.error}")
