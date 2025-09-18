@@ -335,7 +335,8 @@ async def send_test_email(
 ):
     """Send a test email to verify configuration."""
     try:
-        result = await email_sender.send_test_email(request.email)
+        email_sender_instance = email_sender()  # Get the instance
+        result = await email_sender_instance.send_test_email(request.email)
         return {
             "success": result["success"],
             "message": "Test email sent" if result["success"] else "Failed to send test email",
@@ -394,7 +395,8 @@ async def process_brevo_webhook(payload: Dict[str, Any]):
         if event_type in ["bounced", "spam"]:
             # Add to suppression list
             if email:
-                await email_sender.add_to_suppression_list(email, event_type)
+                email_sender_instance = email_sender()  # Get the instance
+                await email_sender_instance.add_to_suppression_list(email, event_type)
         
         logger.info(f"Processed Brevo webhook: {event_type} for {message_id}")
         
