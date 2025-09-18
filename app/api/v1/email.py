@@ -93,19 +93,30 @@ async def get_email_preferences(
 ):
     """Get user's email preferences."""
     try:
+        logger.info(f"🔐 EMAIL API: Getting preferences for user: {user_id}")
+        
         preferences = await repo.get_user_email_preferences(user_id)
+        logger.info(f"🔐 EMAIL API: Retrieved preferences: {preferences}")
+        
         if not preferences:
+            logger.info(f"🔐 EMAIL API: No preferences found, creating default for user: {user_id}")
             # Create default preferences for new user
             success = await repo.create_default_email_preferences(user_id)
+            logger.info(f"🔐 EMAIL API: Create default preferences result: {success}")
+            
             if not success:
+                logger.error(f"🔐 EMAIL API: ❌ Failed to create default preferences for user: {user_id}")
                 raise HTTPException(status_code=500, detail="Failed to create default preferences")
             
             # Get the newly created preferences
             preferences = await repo.get_user_email_preferences(user_id)
+            logger.info(f"🔐 EMAIL API: Retrieved new preferences: {preferences}")
+            
             if not preferences:
+                logger.error(f"🔐 EMAIL API: ❌ Failed to retrieve preferences after creation for user: {user_id}")
                 raise HTTPException(status_code=500, detail="Failed to retrieve preferences after creation")
         
-        return {
+        result = {
             "success": True,
             "preferences": {
                 "weekly_digest_enabled": preferences["weekly_digest_enabled"],
@@ -115,9 +126,17 @@ async def get_email_preferences(
                 "no_activity_policy": preferences["no_activity_policy"]
             }
         }
+        logger.info(f"🔐 EMAIL API: ✅ Returning preferences: {result}")
+        return result
+        
+    except HTTPException:
+        # Re-raise HTTPException as-is
+        raise
     except Exception as e:
-        logger.error(f"Error getting email preferences: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get email preferences")
+        logger.error(f"🔐 EMAIL API: ❌ Error getting email preferences: {e}")
+        import traceback
+        logger.error(f"🔐 EMAIL API: ❌ Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Failed to get email preferences: {str(e)}")
 
 @router.put("/preferences")
 async def update_email_preferences(
