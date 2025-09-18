@@ -365,27 +365,20 @@ class DigestRepo:
             True if successful
         """
         try:
-            logger.info(f"🔐 DIGEST REPO: Updating email preferences for user {user_id}")
-            logger.info(f"🔐 DIGEST REPO: Input preferences: {preferences}")
-            
             # Remove None values
             preferences = {k: v for k, v in preferences.items() if v is not None}
-            logger.info(f"🔐 DIGEST REPO: Cleaned preferences: {preferences}")
             
             # Add user_id to preferences for upsert
             preferences["user_id"] = user_id
-            logger.info(f"🔐 DIGEST REPO: Final preferences with user_id: {preferences}")
             
             # Use upsert to create or update preferences
             response = self.supabase_service.table("email_preferences").upsert(preferences).execute()
             
-            logger.info(f"🔐 DIGEST REPO: Upsert response: {response}")
-            
             if hasattr(response, 'error') and response.error:
-                logger.error(f"🔐 DIGEST REPO: ❌ Error updating email preferences for user {user_id}: {response.error}")                                                                                                        
+                logger.error(f"Error updating email preferences for user {user_id}: {response.error}")                                                                                                        
                 return False
             
-            logger.info(f"🔐 DIGEST REPO: ✅ Successfully updated email preferences for user {user_id}")
+            logger.info(f"Updated email preferences for user {user_id}")
             return True
             
         except Exception as e:
