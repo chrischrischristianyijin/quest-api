@@ -231,15 +231,20 @@ async def preview_digest(
         
         insights, stacks = await repo.get_user_activity(user_id, start_utc, end_utc)
         
-        # Generate content using the same working service as test email
-        from app.services.digest_content import DigestContentService
-        content_service = DigestContentService()
-        payload = await content_service.build_user_digest_payload(user_data, user_prefs)
+        # Generate content using the correct service and method signature
+        from app.services.digest_content import DigestContentGenerator
+        content_generator = DigestContentGenerator()
+        payload = content_generator.build_user_digest_payload(
+            user_data, 
+            insights, 
+            stacks, 
+            user_prefs["no_activity_policy"]
+        )
         
-        # Render email content using the same working service as test email
-        from app.services.digest_job import DigestJobService
-        job_service = DigestJobService()
-        render_result = await job_service._render_email_content(payload)
+        # Render email content using the correct service
+        from app.services.digest_job import DigestJob
+        job = DigestJob(repo)
+        render_result = await job._render_email_content(payload)
         
         if not render_result["success"]:
             raise HTTPException(status_code=500, detail="Failed to render email content")
@@ -420,22 +425,38 @@ async def send_test_email(
         
         logger.info(f"🧪 TEST EMAIL: User data prepared for {user_data.get('first_name', 'User')}")
         
-        # Generate digest content using the same logic as preview
-        from app.services.digest_content import DigestContentService
-        content_service = DigestContentService()
-        digest_payload = await content_service.build_user_digest_payload(user_data, user_prefs)
+        # Generate digest content using the correct service
+        from app.services.digest_content import DigestContentGenerator
+        content_generator = DigestContentGenerator()
+        
+        # Get user activity data for the digest
+        from datetime import datetime, timezone, timedelta
+        from app.utils.time_utils import get_week_boundaries
+        now_utc = datetime.now(timezone.utc)
+        week_boundaries = get_week_boundaries(now_utc, user_prefs["timezone"])
+        week_start = week_boundaries["prev_week_start"].date()
+        start_utc = datetime.combine(week_start, datetime.min.time()).replace(tzinfo=timezone.utc)
+        end_utc = start_utc.replace(hour=23, minute=59, second=59) + timedelta(days=6)
+        
+        insights, stacks = await repo.get_user_activity(user_id, start_utc, end_utc)
+        digest_payload = content_generator.build_user_digest_payload(
+            user_data, 
+            insights, 
+            stacks, 
+            user_prefs["no_activity_policy"]
+        )
         
         logger.info(f"🧪 TEST EMAIL: Digest payload generated with {len(digest_payload.get('insights', []))} insights")
         
         # Send the actual digest email to the test address
-        from app.services.digest_job import DigestJobService
-        job_service = DigestJobService()
+        from app.services.digest_job import DigestJob
+        job = DigestJob(repo)
         
         # Override the email address for testing
         test_user_data = user_data.copy()
         test_user_data["email"] = request.email
         
-        result = await job_service.send_digest_email(test_user_data, digest_payload)
+        result = await job.send_digest_email(test_user_data, digest_payload)
         
         return {
             "success": result["success"],
