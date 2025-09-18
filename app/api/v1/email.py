@@ -210,7 +210,7 @@ async def preview_digest(
         user_data = {
             "id": user_profile["id"],
             "email": user_profile["email"],
-            "first_name": user_profile["first_name"],
+            "first_name": user_profile.get("first_name") or user_profile.get("nickname") or "User",
             "nickname": user_profile.get("nickname"),
             "username": user_profile.get("username"),
             "avatar_url": user_profile.get("avatar_url"),
@@ -230,6 +230,39 @@ async def preview_digest(
         end_utc = start_utc.replace(hour=23, minute=59, second=59) + timedelta(days=6)
         
         insights, stacks = await repo.get_user_activity(user_id, start_utc, end_utc)
+        
+        # Handle empty activity case explicitly
+        no_items = (not insights) and (not stacks)
+        policy = (user_prefs.get("no_activity_policy") or "skip").lower()
+        
+        if no_items and policy == "skip":
+            # Always return a minimal HTML preview instead of failing
+            display_name = user_data.get("first_name") or user_data.get("nickname") or "there"
+            empty_html = f"""
+            <html>
+              <head><meta charset="utf-8"><title>Weekly Digest Preview</title></head>
+              <body style="font-family:Arial,Helvetica,sans-serif;padding:24px">
+                <h2>Weekly Knowledge Digest</h2>
+                <p>Hi {display_name},</p>
+                <p>No new activity found for this week, so your digest will be skipped.</p>
+                <p style="color:#666">Tip: capture a few insights or add items to stacks to see a full preview.</p>
+              </body>
+            </html>
+            """
+            return {
+                "success": True,
+                "preview": {
+                    "subject": "Your Weekly Knowledge Digest (Preview)",
+                    "html_content": empty_html,
+                    "text_content": "No new activity this week. Your digest will be skipped.",
+                    "payload": {
+                        "user": user_data,
+                        "insights": [],
+                        "stacks": [],
+                        "policy": policy
+                    }
+                }
+            }
         
         # Generate content using the correct service and method signature
         from app.services.digest_content import DigestContentGenerator
@@ -416,7 +449,7 @@ async def send_test_email(
         user_data = {
             "id": user_profile["id"],
             "email": user_profile["email"],
-            "first_name": user_profile["first_name"],
+            "first_name": user_profile.get("first_name") or user_profile.get("nickname") or "User",
             "nickname": user_profile.get("nickname"),
             "username": user_profile.get("username"),
             "avatar_url": user_profile.get("avatar_url"),
