@@ -573,3 +573,65 @@ class DigestRepo:
             logger.error(f"Error fetching digest stats: {e}")
             return {}
 
+    async def get_user_profile_data(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get user profile data for digest generation.
+        
+        Args:
+            user_id: User ID
+        
+        Returns:
+            User profile data or None
+        """
+        try:
+            # Get user profile from profiles table
+            response = self.supabase.table("profiles").select(
+                """
+                id,
+                nickname,
+                email,
+                username,
+                avatar_url,
+                created_at,
+                updated_at
+                """
+            ).eq("id", user_id).execute()
+            
+            if hasattr(response, 'error') and response.error:
+                logger.error(f"Error fetching user profile for {user_id}: {response.error}")
+                return None
+            
+            data = response.data or []
+            if not data:
+                logger.warning(f"No user profile found for user {user_id}")
+                return None
+            
+            profile = data[0]
+            
+            # Also try to get email from auth.users if not in profiles
+            if not profile.get("email"):
+                # Try to get from auth.users via RPC or direct query
+                auth_response = self.supabase.table("auth.users").select("email").eq("id", user_id).execute()
+                if not hasattr(auth_response, 'error') and auth_response.data:
+                    profile["email"] = auth_response.data[0].get("email")
+            
+            # Ensure we have the required fields for digest
+            user_data = {
+                "id": profile.get("id"),
+                "email": profile.get("email", "user@example.com"),  # Fallback
+                "first_name": profile.get("nickname") or profile.get("username") or "User",  # Use nickname as first name
+                "nickname": profile.get("nickname"),
+                "username": profile.get("username"),
+                "avatar_url": profile.get("avatar_url"),
+                "created_at": profile.get("created_at"),
+                "updated_at": profile.get("updated_at")
+            }
+            
+            logger.info(f"Retrieved user profile data for {user_id}")
+            return user_data
+            
+        except Exception as e:
+            logger.error(f"Error fetching user profile data for {user_id}: {e}")
+            return None
+
+        

@@ -201,11 +201,19 @@ async def preview_digest(
         if not user_prefs:
             raise HTTPException(status_code=404, detail="User preferences not found")
         
-        # Get user basic info (you might need to fetch this from your users table)
+        # Get user profile data from database
+        user_profile = await repo.get_user_profile_data(user_id)
+        if not user_profile:
+            raise HTTPException(status_code=404, detail="User profile not found")
+        
+        # Combine user profile with preferences
         user_data = {
-            "id": user_id,
-            "email": "user@example.com",  # You'll need to fetch this
-            "first_name": "User",  # You'll need to fetch this
+            "id": user_profile["id"],
+            "email": user_profile["email"],
+            "first_name": user_profile["first_name"],
+            "nickname": user_profile.get("nickname"),
+            "username": user_profile.get("username"),
+            "avatar_url": user_profile.get("avatar_url"),
             "timezone": user_prefs["timezone"]
         }
         
