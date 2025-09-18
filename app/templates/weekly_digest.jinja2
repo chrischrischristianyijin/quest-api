@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="x-ua-compatible" content="ie=edge">
+  <meta name="x-apple-disable-message-reformatting">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>My Quest Space Weekly Knowledge Digest</title>
+</head>
+<body style="margin:0;padding:20px;background:#ffffff;font-family:Arial,Helvetica,sans-serif;line-height:1.6;color:#333;">
+  <div style="max-width:600px;margin:0 auto;">
+    <h2 style="color:#2563eb;margin:0 0 16px;">My Quest Space Weekly Knowledge Digest</h2>
+
+    <p>Hi {{ contact.FIRSTNAME|default('there') }},</p>
+
+    <p>To better utilize your second brain, please check out the following knowledge review report!</p>
+
+    <h3 style="color:#1f2937;margin-top:30px;">This Week's Collection:</h3>
+
+    {% if params.tags and params.tags|length > 0 %}
+      {% for tag in params.tags %}
+      <div style="margin:15px 0;padding:10px;background-color:#f9fafb;border-left:4px solid #2563eb;">
+        <strong>{{ tag.name }}</strong>: {{ tag.articles }}
+      </div>
+      {% endfor %}
+    {% else %}
+      <div style="margin:15px 0;padding:10px;background-color:#f9fafb;border-left:4px solid #2563eb;">
+        No tagged items this week—save some insights to see them here next time.
+      </div>
+    {% endif %}
+
+    <h3 style="color:#1f2937;margin-top:30px;">AI Summary:</h3>
+    <div style="background-color:#f0f9ff;padding:15px;border-radius:8px;margin:15px 0;">
+      {{ params.ai_summary|default('Your AI summary will appear here once generated.') }}
+    </div>
+
+    <h3 style="color:#1f2937;margin-top:30px;">This Week's Recommendations:</h3>
+    <p>Your followed <strong>{{ params.recommended_tag|default('topics') }}</strong> featured articles this week: {{ params.recommended_articles|default('—') }}</p>
+
+    <div style="text-align:center;margin:40px 0;">
+      <a href="{{ params.login_url|default('#') }}" target="_blank" rel="noopener" style="background-color:#2563eb;color:#ffffff;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;">
+        Open Quest – Login to Review Your Knowledge Base
+      </a>
+    </div>
+
+    <p style="text-align:center;color:#6b7280;font-style:italic;margin-top:30px;">
+      Your second brain is not a storage repository, but a thinking accelerator
+    </p>
+
+    <hr style="margin:40px 0;border:none;border-top:1px solid #e5e7eb;">
+
+    <div style="text-align:center;font-size:12px;color:#9ca3af;">
+      <p>
+        <a href="{{ params.unsubscribe_url|default('#') }}" target="_blank" rel="noopener" style="color:#6b7280;">Unsubscribe</a> |
+        <a href="mailto:support@quest.example.com" style="color:#6b7280;">Contact Support</a>
+      </p>
+      <p>&copy; 2025 Quest. All rights reserved.</p>
+    </div>
+  </div>
+</body>
+</html>

@@ -5,10 +5,12 @@ Handles preview, preferences, unsubscribe, and cron operations.
 import logging
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional
+from pathlib import Path
 from fastapi import APIRouter, HTTPException, Depends, Request, BackgroundTasks
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
+from jinja2 import Environment, FileSystemLoader, select_autoescape
 import os
 import hmac
 import hashlib
@@ -22,6 +24,13 @@ from ...services.email_sender import email_sender
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/email", tags=["email"])
+
+# Setup Jinja2 template environment
+TEMPLATES_DIR = Path(__file__).parent.parent.parent / "templates"
+env = Environment(
+    loader=FileSystemLoader(str(TEMPLATES_DIR)),
+    autoescape=select_autoescape(['html', 'xml'])
+)
 
 # Pydantic models
 class EmailPreferencesUpdate(BaseModel):
@@ -43,6 +52,32 @@ from ...services.auth_service import AuthService
 
 # Initialize auth service
 auth_service = AuthService()
+
+def build_context(user_profile: dict, user_prefs: dict, tags_list, ai_summary, rec_tag, rec_articles, login_url, unsubscribe_url):
+    """Build template context for digest rendering."""
+    # safe display name
+    display_name = (
+        user_profile.get("first_name")
+        or user_profile.get("nickname")
+        or user_profile.get("username")
+        or "there"
+    )
+    contact = {"FIRSTNAME": display_name}
+
+    params = {
+        "tags": tags_list or [],
+        "ai_summary": ai_summary or None,
+        "recommended_tag": rec_tag or None,
+        "recommended_articles": rec_articles or None,
+        "login_url": login_url or "#",
+        "unsubscribe_url": unsubscribe_url or "#",
+    }
+    return {"contact": contact, "params": params}
+
+def render_digest_html(context: dict) -> str:
+    """Render digest HTML using Jinja2 template."""
+    template = env.get_template("weekly_digest.jinja2")
+    return template.render(**context)
 
 # Dependency to get current user - using the same approach as other routers
 async def get_current_user_id(credentials: HTTPAuthorizationCredentials = Depends(HTTPBearer())) -> str:
@@ -189,12 +224,10 @@ async def update_email_preferences(
         raise HTTPException(status_code=500, detail=f"Failed to update email preferences: {str(e)}")
 
 @router.post("/digest/preview")
-async def preview_digest(
-    request: DigestPreviewRequest,
-    user_id: str = Depends(get_current_user_id),
-    repo: DigestRepo = Depends()
-):
-    """Preview the next digest for a user."""
+async def digest_preview_post(payload: dict, request: Request, user_id: str = Depends(get_current_user_id), repo: DigestRepo = Depends()):
+    """
+    Returns JSON with html_content, for clients that expect JSON.
+    """
     try:
         # Get user data
         user_prefs = await repo.get_user_email_preferences(user_id)
@@ -206,24 +239,10 @@ async def preview_digest(
         if not user_profile:
             raise HTTPException(status_code=404, detail="User profile not found")
         
-        # Combine user profile with preferences
-        user_data = {
-            "id": user_profile["id"],
-            "email": user_profile["email"],
-            "first_name": user_profile.get("first_name") or user_profile.get("nickname") or "User",
-            "nickname": user_profile.get("nickname"),
-            "username": user_profile.get("username"),
-            "avatar_url": user_profile.get("avatar_url"),
-            "timezone": user_prefs["timezone"]
-        }
-        
         # Determine week boundaries
-        if request.week_start:
-            week_start = datetime.fromisoformat(request.week_start).date()
-        else:
-            now_utc = datetime.now(timezone.utc)
-            week_boundaries = get_week_boundaries(now_utc, user_prefs["timezone"])
-            week_start = week_boundaries["prev_week_start"].date()
+        now_utc = datetime.now(timezone.utc)
+        week_boundaries = get_week_boundaries(now_utc, user_prefs["timezone"])
+        week_start = week_boundaries["prev_week_start"].date()
         
         # Get user activity for the week
         start_utc = datetime.combine(week_start, datetime.min.time()).replace(tzinfo=timezone.utc)
@@ -231,89 +250,145 @@ async def preview_digest(
         
         insights, stacks = await repo.get_user_activity(user_id, start_utc, end_utc)
         
-        # Handle empty activity case explicitly
-        no_items = (not insights) and (not stacks)
-        policy = (user_prefs.get("no_activity_policy") or "skip").lower()
+        # Build tags list from insights and stacks
+        tags_list = []
+        if insights:
+            # Group insights by tags
+            tag_groups = {}
+            for insight in insights:
+                tags = insight.get("tags", []) or []
+                for tag in tags:
+                    if tag not in tag_groups:
+                        tag_groups[tag] = []
+                    tag_groups[tag].append(insight.get("title", "Untitled"))
+            
+            for tag_name, articles in tag_groups.items():
+                tags_list.append({
+                    "name": tag_name,
+                    "articles": ", ".join(articles[:3])  # Limit to first 3
+                })
         
-        if no_items and policy == "skip":
-            # Always return a minimal HTML preview instead of failing
-            display_name = user_data.get("first_name") or user_data.get("nickname") or "there"
-            empty_html = f"""
-            <html>
-              <head><meta charset="utf-8"><title>Weekly Digest Preview</title></head>
-              <body style="font-family:Arial,Helvetica,sans-serif;padding:24px">
-                <h2>Weekly Knowledge Digest</h2>
-                <p>Hi {display_name},</p>
-                <p>No new activity found for this week, so your digest will be skipped.</p>
-                <p style="color:#666">Tip: capture a few insights or add items to stacks to see a full preview.</p>
-              </body>
-            </html>
-            """
-            return {
-                "success": True,
-                "preview": {
-                    "subject": "Your Weekly Knowledge Digest (Preview)",
-                    "html_content": empty_html,
-                    "text_content": "No new activity this week. Your digest will be skipped.",
-                    "payload": {
-                        "user": user_data,
-                        "insights": [],
-                        "stacks": [],
-                        "policy": policy
-                    }
-                }
-            }
+        # Build AI summary (placeholder for now)
+        ai_summary = "Weekly insights analysis coming soon!"
         
-        # Generate content using the correct service and method signature
-        from app.services.digest_content import DigestContentGenerator
-        content_generator = DigestContentGenerator()
-        payload = content_generator.build_user_digest_payload(
-            user_data, 
-            insights, 
-            stacks, 
-            user_prefs["no_activity_policy"]
+        # Build recommendations (placeholder)
+        rec_tag = "AI & Technology"
+        rec_articles = f"{len(insights)} insights captured"
+        
+        # Build URLs
+        login_url = "https://quest.app/login"
+        unsubscribe_url = f"https://quest.app/unsubscribe?uid={user_id}"
+
+        context = build_context(
+            user_profile=user_profile,
+            user_prefs=user_prefs,
+            tags_list=tags_list,
+            ai_summary=ai_summary,
+            rec_tag=rec_tag,
+            rec_articles=rec_articles,
+            login_url=login_url,
+            unsubscribe_url=unsubscribe_url
         )
-        
-        # Render email content using the correct service
-        from app.services.digest_job import DigestJob
-        job = DigestJob(repo)
-        render_result = await job._render_email_content(payload)
-        
-        if not render_result["success"]:
-            raise HTTPException(status_code=500, detail="Failed to render email content")
-        
-        return {
+        html = render_digest_html(context)
+
+        return JSONResponse({
             "success": True,
             "preview": {
-                "subject": render_result["subject"],
-                "html_content": render_result["html_content"],
-                "text_content": render_result["text_content"],
-                "payload": payload
+                "subject": "Your Weekly Knowledge Digest (Preview)",
+                "html_content": html,
+                "text_content": "",  # optional: convert html->text if you like
+                "payload": {
+                    "tags_count": len(tags_list or []),
+                }
             }
-        }
+        }, status_code=200)
+
     except Exception as e:
-        logger.error(f"Error generating digest preview: {e}")
-        raise HTTPException(status_code=500, detail="Failed to generate preview")
+        logger.error(f"digest preview POST failed: {e}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return JSONResponse({"success": False, "message": "Failed to generate HTML preview"}, status_code=500)
 
 @router.get("/digest/preview", response_class=HTMLResponse)
-async def preview_digest_html(
-    user_id: str = Depends(get_current_user_id),
-    repo: DigestRepo = Depends()
-):
-    """Preview the next digest as HTML."""
+async def digest_preview_get(request: Request, user_id: str = Depends(get_current_user_id), repo: DigestRepo = Depends()):
+    """
+    Returns raw HTML for preview (used by the modal GET path).
+    """
     try:
-        # Generate preview data
-        request = DigestPreviewRequest(user_id=user_id)
-        preview_data = await preview_digest(request, user_id, repo)
+        # Get user data
+        user_prefs = await repo.get_user_email_preferences(user_id)
+        if not user_prefs:
+            raise HTTPException(status_code=404, detail="User preferences not found")
         
-        if not preview_data["success"]:
-            raise HTTPException(status_code=500, detail="Failed to generate preview")
+        # Get user profile data from database
+        user_profile = await repo.get_user_profile_data(user_id)
+        if not user_profile:
+            raise HTTPException(status_code=404, detail="User profile not found")
         
-        # Return HTML content
-        return HTMLResponse(content=preview_data["preview"]["html_content"])
+        # Determine week boundaries
+        now_utc = datetime.now(timezone.utc)
+        week_boundaries = get_week_boundaries(now_utc, user_prefs["timezone"])
+        week_start = week_boundaries["prev_week_start"].date()
+        
+        # Get user activity for the week
+        start_utc = datetime.combine(week_start, datetime.min.time()).replace(tzinfo=timezone.utc)
+        end_utc = start_utc.replace(hour=23, minute=59, second=59) + timedelta(days=6)
+        
+        insights, stacks = await repo.get_user_activity(user_id, start_utc, end_utc)
+        
+        # Build tags list from insights and stacks
+        tags_list = []
+        if insights:
+            # Group insights by tags
+            tag_groups = {}
+            for insight in insights:
+                tags = insight.get("tags", []) or []
+                for tag in tags:
+                    if tag not in tag_groups:
+                        tag_groups[tag] = []
+                    tag_groups[tag].append(insight.get("title", "Untitled"))
+            
+            for tag_name, articles in tag_groups.items():
+                tags_list.append({
+                    "name": tag_name,
+                    "articles": ", ".join(articles[:3])  # Limit to first 3
+                })
+        
+        # Build AI summary (placeholder for now)
+        ai_summary = "Weekly insights analysis coming soon!"
+        
+        # Build recommendations (placeholder)
+        rec_tag = "AI & Technology"
+        rec_articles = f"{len(insights)} insights captured"
+        
+        # Build URLs
+        login_url = "https://quest.app/login"
+        unsubscribe_url = f"https://quest.app/unsubscribe?uid={user_id}"
+
+        context = build_context(
+            user_profile=user_profile,
+            user_prefs=user_prefs,
+            tags_list=tags_list,
+            ai_summary=ai_summary,
+            rec_tag=rec_tag,
+            rec_articles=rec_articles,
+            login_url=login_url,
+            unsubscribe_url=unsubscribe_url
+        )
+
+        # Empty state safety: always return valid HTML
+        html = render_digest_html(context)
+        return HTMLResponse(content=html, status_code=200)
+
     except Exception as e:
-        logger.error(f"Error generating HTML preview: {e}")
-        raise HTTPException(status_code=500, detail="Failed to generate HTML preview")
+        logger.error(f"digest preview GET failed: {e}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        # return readable HTML even on errors (so the modal doesn't look broken)
+        return HTMLResponse(
+            content="<html><body style='font-family:Arial;padding:24px'>Failed to generate HTML preview.</body></html>",
+            status_code=500
+        )
 
 @router.post("/unsubscribe")
 async def unsubscribe_user(
