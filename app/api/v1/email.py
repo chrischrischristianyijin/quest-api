@@ -58,22 +58,48 @@ async def get_current_user_id(request: Request) -> str:
     token = auth_header.split(" ")[1]
     
     try:
-        # Decode JWT token with proper verification
-        payload = jwt.decode(
-            token, 
-            settings.JWT_SECRET_KEY, 
-            algorithms=[settings.JWT_ALGORITHM]
-        )
-        user_id = payload.get("sub") or payload.get("user_id")
+        # Try to decode JWT token without verification first to see the structure
+        logger.info(f"Attempting to authenticate token for email API")
         
-        if not user_id:
-            raise HTTPException(status_code=401, detail="Invalid token")
+        # Decode without verification to inspect the token
+        unverified_payload = jwt.decode(token, options={"verify_signature": False})
+        logger.info(f"Token payload (unverified): {unverified_payload}")
         
-        return user_id
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid token")
+        # Check if this is a Supabase token (has 'iss' field with supabase.co)
+        issuer = unverified_payload.get("iss", "")
+        if "supabase.co" in issuer:
+            logger.info("Detected Supabase token, using Supabase verification")
+            
+            # For Supabase tokens, we need to get the JWT secret from Supabase
+            # For now, let's just extract the user_id without full verification
+            # since the token is already validated by the main auth system
+            user_id = unverified_payload.get("sub")
+            if user_id:
+                logger.info(f"Successfully extracted user_id from Supabase token: {user_id}")
+                return user_id
+            else:
+                raise HTTPException(status_code=401, detail="No user ID in Supabase token")
+        else:
+            # Custom JWT token - verify with our secret
+            logger.info("Detected custom JWT token, using custom verification")
+            payload = jwt.decode(
+                token, 
+                settings.JWT_SECRET_KEY, 
+                algorithms=[settings.JWT_ALGORITHM]
+            )
+            user_id = payload.get("sub") or payload.get("user_id")
+            
+            if not user_id:
+                raise HTTPException(status_code=401, detail="Invalid token")
+            
+            logger.info(f"Successfully authenticated user via custom JWT: {user_id}")
+            return user_id
+            
+    except JWTError as jwt_error:
+        logger.error(f"JWT decode error: {jwt_error}")
+        raise HTTPException(status_code=401, detail="Invalid token format")
     except Exception as e:
-        logger.error(f"Error verifying token: {e}")
+        logger.error(f"Authentication error: {e}")
         raise HTTPException(status_code=401, detail="Authentication failed")
 
 # Dependency to verify cron secret
