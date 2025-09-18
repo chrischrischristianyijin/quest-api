@@ -6,6 +6,7 @@ import logging
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional
 from fastapi import APIRouter, HTTPException, Depends, Request, BackgroundTasks
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 import os
@@ -37,81 +38,34 @@ class DigestPreviewRequest(BaseModel):
 class UnsubscribeRequest(BaseModel):
     token: str
 
-# Dependency to get current user
-async def get_current_user_id(request: Request) -> str:
-    """Get current user ID from JWT token in Authorization header."""
-    from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+# Import auth service for consistent authentication
+from ...services.auth_service import AuthService
+
+# Initialize auth service
+auth_service = AuthService()
+
+# Dependency to get current user - using the same approach as other routers
+async def get_current_user_id(credentials: HTTPAuthorizationCredentials = Depends(HTTPBearer())) -> str:
+    """Get current user ID using the standard auth service."""
     try:
-        from jose import JWTError, jwt
-    except ImportError:
-        # Fallback if jose is not available
-        import jwt as pyjwt
-        JWTError = pyjwt.InvalidTokenError
-    import os
-    from ...core.config import settings
-    
-    # Get the Authorization header
-    auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Authentication required")
-    
-    token = auth_header.split(" ")[1]
-    
-    try:
-        # Try to decode JWT token without verification first to see the structure
-        logger.info(f"🔐 EMAIL API: Attempting to authenticate token")
-        logger.info(f"🔐 EMAIL API: Token preview: {token[:50]}...")
+        logger.info(f"🔐 EMAIL API: Authenticating user with standard auth service")
         
-        # Decode without verification to inspect the token
-        unverified_payload = jwt.decode(token, options={"verify_signature": False})
-        logger.info(f"🔐 EMAIL API: Token payload (unverified): {unverified_payload}")
+        # Use the same authentication method as other routers
+        current_user = await auth_service.get_current_user(credentials.credentials)
         
-        # Check if this is a Supabase token (has 'iss' field with supabase.co)
-        issuer = unverified_payload.get("iss", "")
-        logger.info(f"🔐 EMAIL API: Token issuer: {issuer}")
+        user_id = current_user.get("id")
+        if not user_id:
+            logger.error(f"🔐 EMAIL API: ❌ No user ID in auth response")
+            raise HTTPException(status_code=401, detail="Invalid user data")
         
-        if "supabase.co" in issuer:
-            logger.info("🔐 EMAIL API: Detected Supabase token, using Supabase verification")
-            
-            # For Supabase tokens, we need to get the JWT secret from Supabase
-            # For now, let's just extract the user_id without full verification
-            # since the token is already validated by the main auth system
-            user_id = unverified_payload.get("sub")
-            logger.info(f"🔐 EMAIL API: Extracted user_id from token: {user_id}")
-            
-            if user_id:
-                logger.info(f"🔐 EMAIL API: ✅ Successfully extracted user_id from Supabase token: {user_id}")
-                return user_id
-            else:
-                logger.error(f"🔐 EMAIL API: ❌ No user ID in Supabase token")
-                raise HTTPException(status_code=401, detail="No user ID in Supabase token")
-        else:
-            # Custom JWT token - verify with our secret
-            logger.info("🔐 EMAIL API: Detected custom JWT token, using custom verification")
-            payload = jwt.decode(
-                token, 
-                settings.JWT_SECRET_KEY, 
-                algorithms=[settings.JWT_ALGORITHM]
-            )
-            user_id = payload.get("sub") or payload.get("user_id")
-            
-            if not user_id:
-                logger.error(f"🔐 EMAIL API: ❌ No user ID in custom token")
-                raise HTTPException(status_code=401, detail="Invalid token")
-            
-            logger.info(f"🔐 EMAIL API: ✅ Successfully authenticated user via custom JWT: {user_id}")
-            return user_id
-            
-    except JWTError as jwt_error:
-        logger.error(f"🔐 EMAIL API: ❌ JWT decode error: {jwt_error}")
-        logger.error(f"🔐 EMAIL API: ❌ JWT error type: {type(jwt_error)}")
-        raise HTTPException(status_code=401, detail="Invalid token format")
-    except HTTPException:
-        # Re-raise HTTPException as-is
-        raise
+        logger.info(f"🔐 EMAIL API: ✅ Successfully authenticated user: {user_id}")
+        return user_id
+        
+    except ValueError as ve:
+        logger.error(f"🔐 EMAIL API: ❌ Auth service error: {ve}")
+        raise HTTPException(status_code=401, detail=str(ve))
     except Exception as e:
         logger.error(f"🔐 EMAIL API: ❌ Authentication error: {e}")
-        logger.error(f"🔐 EMAIL API: ❌ Exception type: {type(e)}")
         import traceback
         logger.error(f"🔐 EMAIL API: ❌ Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=401, detail="Authentication failed")
