@@ -3,7 +3,7 @@ Email API endpoints for digest system.
 Handles preview, preferences, unsubscribe, and cron operations.
 """
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional
 from fastapi import APIRouter, HTTPException, Depends, Request, BackgroundTasks
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -28,7 +28,7 @@ class EmailPreferencesUpdate(BaseModel):
     preferred_day: Optional[int] = Field(None, ge=0, le=6)
     preferred_hour: Optional[int] = Field(None, ge=0, le=23)
     timezone: Optional[str] = None
-    no_activity_policy: Optional[str] = Field(None, regex="^(skip|brief|suggestions)$")
+    no_activity_policy: Optional[str] = Field(None, pattern="^(skip|brief|suggestions)$")
 
 class DigestPreviewRequest(BaseModel):
     user_id: str
@@ -37,15 +37,40 @@ class DigestPreviewRequest(BaseModel):
 class UnsubscribeRequest(BaseModel):
     token: str
 
-# Dependency to get current user (implement based on your auth system)
+# Dependency to get current user
 async def get_current_user_id(request: Request) -> str:
-    """Get current user ID from request (implement based on your auth system)."""
-    # This is a placeholder - implement based on your authentication system
-    # For example, extract from JWT token or session
-    user_id = request.headers.get("X-User-ID")
-    if not user_id:
+    """Get current user ID from JWT token in Authorization header."""
+    from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+    try:
+        from jose import JWTError, jwt
+    except ImportError:
+        # Fallback if jose is not available
+        import jwt as pyjwt
+        JWTError = pyjwt.InvalidTokenError
+    import os
+    
+    # Get the Authorization header
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Authentication required")
-    return user_id
+    
+    token = auth_header.split(" ")[1]
+    
+    try:
+        # Decode JWT token (you may need to adjust this based on your JWT secret)
+        # For now, we'll use a simple approach - you might need to get the secret from your config
+        payload = jwt.decode(token, options={"verify_signature": False})
+        user_id = payload.get("sub") or payload.get("user_id")
+        
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        
+        return user_id
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    except Exception as e:
+        logger.error(f"Error verifying token: {e}")
+        raise HTTPException(status_code=401, detail="Authentication failed")
 
 # Dependency to verify cron secret
 def verify_cron_secret(request: Request) -> bool:
@@ -300,14 +325,17 @@ async def get_email_stats(
         logger.error(f"Error getting email stats: {e}")
         raise HTTPException(status_code=500, detail="Failed to get email stats")
 
+class TestEmailRequest(BaseModel):
+    email: str
+
 @router.post("/test")
 async def send_test_email(
-    email: str,
+    request: TestEmailRequest,
     user_id: str = Depends(get_current_user_id)
 ):
     """Send a test email to verify configuration."""
     try:
-        result = await email_sender.send_test_email(email)
+        result = await email_sender.send_test_email(request.email)
         return {
             "success": result["success"],
             "message": "Test email sent" if result["success"] else "Failed to send test email",
