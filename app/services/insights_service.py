@@ -847,8 +847,12 @@ class InsightsService:
             else:
                 logger.info(f"[后台任务] insight_contents 保存成功: {url}")
                 
-                # 6.1 保存文本分块数据
-                await _save_insight_chunks(insight_id, cleaned_text, page.get('refine_report', {}))
+                # 6.1 保存文本分块数据（如果启用）
+                from app.utils.metadata import is_chunker_enabled
+                if is_chunker_enabled():
+                    await _save_insight_chunks(insight_id, cleaned_text, page.get('refine_report', {}))
+                else:
+                    logger.info(f"[后台任务] 分块功能未启用，跳过分块保存: insight_id={insight_id}")
                 
                 # 6.2 保存后回读校验，如 summary 为空且我们本地有 summary_text，则进行一次回填更新
                 try:
