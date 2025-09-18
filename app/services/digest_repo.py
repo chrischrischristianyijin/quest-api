@@ -15,12 +15,16 @@ class DigestRepo:
     
     def __init__(self):
         self.supabase_url = os.getenv("SUPABASE_URL")
-        self.supabase_key = os.getenv("SUPABASE_ANON_KEY")
+        self.supabase_anon_key = os.getenv("SUPABASE_ANON_KEY")
+        self.supabase_service_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
         
-        if not self.supabase_url or not self.supabase_key:
-            raise ValueError("SUPABASE_URL and SUPABASE_ANON_KEY environment variables are required")
+        if not self.supabase_url or not self.supabase_anon_key or not self.supabase_service_key:
+            raise ValueError("SUPABASE_URL, SUPABASE_ANON_KEY, and SUPABASE_SERVICE_ROLE_KEY environment variables are required")
         
-        self.supabase: Client = create_client(self.supabase_url, self.supabase_key)
+        # Use ANON key for read operations
+        self.supabase: Client = create_client(self.supabase_url, self.supabase_anon_key)
+        # Use SERVICE ROLE key for write operations (create/update/delete)
+        self.supabase_service: Client = create_client(self.supabase_url, self.supabase_service_key)
     
     async def get_sendable_users(self, now_utc: datetime) -> List[Dict[str, Any]]:
         """
@@ -195,7 +199,7 @@ class DigestRepo:
             Digest record ID
         """
         try:
-            response = self.supabase.table("email_digests").insert({
+            response = self.supabase_service.table("email_digests").insert({
                 "user_id": user_id,
                 "week_start": week_start.isoformat(),
                 "status": status,
@@ -246,12 +250,12 @@ class DigestRepo:
             
             if error is not None:
                 update_data["error"] = error
-                update_data["retry_count"] = self.supabase.rpc("increment_retry_count", {"digest_id": digest_id}).execute()
+                update_data["retry_count"] = self.supabase_service.rpc("increment_retry_count", {"digest_id": digest_id}).execute()
             
             if payload is not None:
                 update_data["payload"] = payload
             
-            response = self.supabase.table("email_digests").update(update_data).eq("id", digest_id).execute()
+            response = self.supabase_service.table("email_digests").update(update_data).eq("id", digest_id).execute()
             
             if hasattr(response, 'error') and response.error:
                 logger.error(f"Error updating digest {digest_id}: {response.error}")
@@ -322,7 +326,7 @@ class DigestRepo:
             
             logger.info(f"🔐 DIGEST REPO: Default preferences data: {default_preferences}")
             
-            response = self.supabase.table("email_preferences").insert(default_preferences).execute()
+            response = self.supabase_service.table("email_preferences").insert(default_preferences).execute()
             
             logger.info(f"🔐 DIGEST REPO: Supabase response: {response}")
             logger.info(f"🔐 DIGEST REPO: Response data: {response.data}")
@@ -368,7 +372,7 @@ class DigestRepo:
             preferences["user_id"] = user_id
             
             # Use upsert to create or update preferences
-            response = self.supabase.table("email_preferences").upsert(preferences).execute()
+            response = self.supabase_service.table("email_preferences").upsert(preferences).execute()
             
             if hasattr(response, 'error') and response.error:
                 logger.error(f"Error updating email preferences for user {user_id}: {response.error}")

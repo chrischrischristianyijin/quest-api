@@ -99,24 +99,37 @@ async def get_email_preferences(
         logger.info(f"🔐 EMAIL API: Retrieved preferences: {preferences}")
         
         if not preferences:
-            logger.info(f"🔐 EMAIL API: No preferences found, returning default preferences for user: {user_id}")
+            logger.info(f"🔐 EMAIL API: No preferences found, creating default preferences for user: {user_id}")
             
-            # Return default preferences without creating them in the database
-            # This allows the frontend to work while we debug the database issue
-            default_preferences = {
-                "weekly_digest_enabled": False,  # Start with disabled by default
-                "preferred_day": 1,  # Monday
-                "preferred_hour": 9,  # 9 AM
-                "timezone": "America/Los_Angeles",  # Default timezone
-                "no_activity_policy": "skip"  # Skip if no activity
-            }
+            # Create default preferences for new user using service role key
+            success = await repo.create_default_email_preferences(user_id)
+            logger.info(f"🔐 EMAIL API: Create default preferences result: {success}")
             
-            result = {
-                "success": True,
-                "preferences": default_preferences
-            }
-            logger.info(f"🔐 EMAIL API: ✅ Returning default preferences: {result}")
-            return result
+            if not success:
+                logger.error(f"🔐 EMAIL API: ❌ Failed to create default preferences for user: {user_id}")
+                # Fall back to returning default preferences without database storage
+                default_preferences = {
+                    "weekly_digest_enabled": False,  # Start with disabled by default
+                    "preferred_day": 1,  # Monday
+                    "preferred_hour": 9,  # 9 AM
+                    "timezone": "America/Los_Angeles",  # Default timezone
+                    "no_activity_policy": "skip"  # Skip if no activity
+                }
+                
+                result = {
+                    "success": True,
+                    "preferences": default_preferences
+                }
+                logger.info(f"🔐 EMAIL API: ✅ Returning fallback default preferences: {result}")
+                return result
+            
+            # Get the newly created preferences
+            preferences = await repo.get_user_email_preferences(user_id)
+            logger.info(f"🔐 EMAIL API: Retrieved new preferences: {preferences}")
+            
+            if not preferences:
+                logger.error(f"🔐 EMAIL API: ❌ Failed to retrieve preferences after creation for user: {user_id}")
+                raise HTTPException(status_code=500, detail="Failed to retrieve preferences after creation")
         
         result = {
             "success": True,
@@ -154,19 +167,17 @@ async def update_email_preferences(
         prefs_dict = preferences.dict(exclude_unset=True)
         logger.info(f"🔐 EMAIL API: Preferences to update: {prefs_dict}")
         
-        # For now, return success without actually updating the database
-        # This allows the frontend to work while we debug the database issue
-        logger.info(f"🔐 EMAIL API: ✅ Returning success for preferences update (workaround active)")
+        # Update preferences in the database using the service role key
+        success = await repo.update_user_email_preferences(user_id, prefs_dict)
+        if not success:
+            logger.error(f"🔐 EMAIL API: ❌ Failed to update preferences in database for user: {user_id}")
+            raise HTTPException(status_code=500, detail="Failed to update preferences")
         
+        logger.info(f"🔐 EMAIL API: ✅ Successfully updated preferences in database for user: {user_id}")
         return {
             "success": True,
             "message": "Email preferences updated successfully"
         }
-        
-        # TODO: Re-enable database update once Supabase table issues are resolved
-        # success = await repo.update_user_email_preferences(user_id, prefs_dict)
-        # if not success:
-        #     raise HTTPException(status_code=500, detail="Failed to update preferences")
         
     except HTTPException:
         # Re-raise HTTPException as-is
