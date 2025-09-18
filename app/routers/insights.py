@@ -160,69 +160,60 @@ async def get_insight(
         logger.error(f"获取见解详情失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/{insight_id}/status")
-async def get_insight_status(
-    insight_id: UUID,
-    credentials: HTTPAuthorizationCredentials = Depends(security)
-):
-    """获取insight的处理状态和最新数据"""
-    try:
-        auth_service = AuthService()
-        current_user = await auth_service.get_current_user(credentials.credentials)
-        
-        insights_service = InsightsService()
-        result = await insights_service.get_insight_status(insight_id, UUID(current_user["id"]))
-        
-        if not result.get("success"):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=result.get("message", "获取insight状态失败")
-            )
-        
-        return result
-    except Exception as e:
-        logger.error(f"获取insight状态失败: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
 @router.post("/")
 async def create_insight(
     insight: InsightCreateFromURL,
     credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
-    """创建新见解（轻写入模式：立即返回，异步处理metadata）"""
+    """创建新见解（从URL自动获取metadata）"""
     try:
         auth_service = AuthService()
         current_user = await auth_service.get_current_user(credentials.credentials)
         
-        # 🚀 轻写入模式：立即创建基础insight记录，不等待metadata抓取
-        insights_service = InsightsService()
-        result = await insights_service.create_insight_light(
+        # 从URL提取metadata（统一使用utils）- 可选，失败不阻断创建
+        try:
+            metadata = await utils_extract_metadata_from_url(insight.url)
+        except Exception as fetch_err:
+            logger.warning(f"提取metadata失败，将使用占位信息继续创建: {fetch_err}")
+            metadata = {
+                "title": "无标题",
+                "description": "",
+                "image_url": None
+            }
+        
+        # 创建完整的insight数据
+        # 优先使用用户自定义标题，如果没有则使用提取的标题
+        final_title = insight.title if insight.title else metadata.get("title", "无标题")
+        
+        insight_data = InsightCreate(
+            title=final_title,
+            description=metadata.get("description", ""),
             url=insight.url,
-            title=insight.title,  # 用户自定义标题（如果有）
+            image_url=metadata.get("image_url"),
             thought=insight.thought,
             tag_ids=insight.tag_ids,
-            stack_id=insight.stack_id,
-            user_id=UUID(current_user["id"])
+            stack_id=insight.stack_id
         )
+        
+        # 调试日志
+        logger.info(f"🔍 DEBUG: 从URL创建insight: stack_id={insight.stack_id}, type={type(insight.stack_id)}")
+        logger.info(f"🔍 DEBUG: 创建的insight_data: stack_id={insight_data.stack_id}, type={type(insight_data.stack_id)}")
+        logger.info(f"🔍 DEBUG: 完整insight对象: {insight}")
+        logger.info(f"🔍 DEBUG: 完整insight_data对象: {insight_data}")
+
+        # 将提取到的完整 metadata 附带在请求生命周期中，通过服务层落库（若列存在）
+        # 动态附加，避免修改 Pydantic 入参模型
+        # 使用字典属性存储，服务中读取
+        setattr(insight_data, "meta", metadata)
+        
+        insights_service = InsightsService()
+        result = await insights_service.create_insight(insight_data, UUID(current_user["id"]))
         
         if not result.get("success"):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=result.get("message", "创建insight失败")
             )
-        
-        # 🎯 启动异步metadata抓取任务（不等待完成）
-        insight_id = result["data"]["id"]
-        try:
-            import asyncio
-            asyncio.create_task(insights_service._fetch_metadata_async(
-                insight_id=insight_id,
-                url=insight.url,
-                user_id=UUID(current_user["id"])
-            ))
-            logger.info(f"已启动异步metadata抓取任务: insight_id={insight_id}")
-        except Exception as task_err:
-            logger.warning(f"启动异步metadata抓取任务失败: {task_err}")
         
         return result
     except Exception as e:

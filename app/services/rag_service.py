@@ -90,11 +90,6 @@ class RAGService:
     async def embed_text(self, text: str) -> List[float]:
         """将文本转换为向量嵌入"""
         try:
-            # 检查embedding功能是否启用
-            if os.getenv('EMBEDDING_ENABLED', 'true').lower() != 'true':
-                logger.warning("Embedding 功能未启用，跳过embedding生成")
-                raise ValueError("EMBEDDING_ENABLED 未启用")
-            
             if not self.openai_api_key:
                 raise ValueError("OPENAI_API_KEY 未配置")
             
@@ -412,22 +407,20 @@ class RAGService:
             keywords = await self.extract_keywords(query)
             logger.info(f"提取的关键词: {keywords}")
             
-            # 2. 文本嵌入（使用关键词）
-            try:
+            # 2. 文本嵌入（使用关键词）- 检查是否启用embedding
+            query_embedding = None
+            if os.getenv('EMBEDDING_ENABLED', 'true').lower() == 'true':
                 query_embedding = await self.embed_text(keywords)
-            except ValueError as e:
-                if "EMBEDDING_ENABLED 未启用" in str(e):
-                    logger.info("Embedding 功能未启用，返回空上下文")
-                    return RAGContext(
-                        context_text="",
-                        chunks=[],
-                        total_chunks=0,
-                        used_chunks=0,
-                        context_tokens=0,
-                        max_tokens=max_context_tokens
-                    )
-                else:
-                    raise
+            else:
+                logger.info("Embedding功能未启用，跳过向量搜索")
+                # 返回空的RAG上下文
+                return RAGContext(
+                    context_text="",
+                    chunks=[],
+                    total_chunks=0,
+                    query=query,
+                    keywords=keywords
+                )
             
             # 3. 个性化检索策略
             chunks = await self._personalized_retrieve(
