@@ -51,6 +51,12 @@ class Settings(BaseSettings):
     OPENAI_ORGANIZATION: str = ""
     OPENAI_PROJECT: str = ""
     
+    # Brevo 邮件配置
+    BREVO_API_KEY: str = ""
+    BREVO_TEMPLATE_ID: int = 0
+    APP_BASE_URL: str = "https://myquestspace.com"
+    UNSUBSCRIBE_BASE_URL: str = "https://myquestspace.com/unsubscribe"
+    
     # AI聊天配置
     CHAT_MODEL: str = "gpt-4o-mini"
     CHAT_MAX_TOKENS: int = 4000  # 增加输出token限制

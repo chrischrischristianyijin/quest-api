@@ -11,7 +11,14 @@
   <div style="max-width:600px;margin:0 auto;">
     <h2 style="color:#2563eb;margin:0 0 16px;">My Quest Space Weekly Knowledge Digest</h2>
 
-    <p>Hi {{ contact.FIRSTNAME|default('there') }},</p>
+    <p>
+      Hi
+      {% if contact.FIRSTNAME %}
+        {{ contact.FIRSTNAME }}
+      {% else %}
+        there
+      {% endif %},
+    </p>
 
     <p>To better utilize your second brain, please check out the following knowledge review report!</p>
 
@@ -19,9 +26,10 @@
 
     {% if params.tags and params.tags|length > 0 %}
       {% for tag in params.tags %}
-      <div style="margin:15px 0;padding:10px;background-color:#f9fafb;border-left:4px solid #2563eb;">
-        <strong>{{ tag.name }}</strong>: {{ tag.articles }}
-      </div>
+        <div style="margin:15px 0;padding:10px;background-color:#f9fafb;border-left:4px solid #2563eb;">
+          <strong>{{ tag.name }}</strong>:
+          {% if tag.articles %}{{ tag.articles }}{% else %}—{% endif %}
+        </div>
       {% endfor %}
     {% else %}
       <div style="margin:15px 0;padding:10px;background-color:#f9fafb;border-left:4px solid #2563eb;">
@@ -31,14 +39,19 @@
 
     <h3 style="color:#1f2937;margin-top:30px;">AI Summary:</h3>
     <div style="background-color:#f0f9ff;padding:15px;border-radius:8px;margin:15px 0;">
-      {{ params.ai_summary|default('Your AI summary will appear here once generated.') }}
+      {% if params.ai_summary %}{{ params.ai_summary }}{% else %}Your AI summary will appear here once generated.{% endif %}
     </div>
 
     <h3 style="color:#1f2937;margin-top:30px;">This Week's Recommendations:</h3>
-    <p>Your followed <strong>{{ params.recommended_tag|default('topics') }}</strong> featured articles this week: {{ params.recommended_articles|default('—') }}</p>
+    <p>
+      Your followed
+      <strong>{% if params.recommended_tag %}{{ params.recommended_tag }}{% else %}topics{% endif %}</strong>
+      featured articles this week:
+      {% if params.recommended_articles %}{{ params.recommended_articles }}{% else %}—{% endif %}
+    </p>
 
     <div style="text-align:center;margin:40px 0;">
-      <a href="{{ params.login_url|default('#') }}" target="_blank" rel="noopener" style="background-color:#2563eb;color:#ffffff;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;">
+      <a href="{{ params.login_url }}" target="_blank" rel="noopener" style="background-color:#2563eb;color:#ffffff;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;">
         Open Quest – Login to Review Your Knowledge Base
       </a>
     </div>
@@ -51,7 +64,7 @@
 
     <div style="text-align:center;font-size:12px;color:#9ca3af;">
       <p>
-        <a href="{{ params.unsubscribe_url|default('#') }}" target="_blank" rel="noopener" style="color:#6b7280;">Unsubscribe</a> |
+        <a href="{{ params.unsubscribe_url }}" target="_blank" rel="noopener" style="color:#6b7280;">Unsubscribe</a> |
         <a href="mailto:support@quest.example.com" style="color:#6b7280;">Contact Support</a>
       </p>
       <p>&copy; 2025 Quest. All rights reserved.</p>

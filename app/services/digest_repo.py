@@ -635,4 +635,117 @@ class DigestRepo:
             logger.error(f"Error fetching user profile data for {user_id}: {e}")
             return None
 
+    async def get_recent_insights(self, user_id: str, days: int = 7) -> List[Dict[str, Any]]:
+        """
+        Get recent insights for a user within the specified number of days.
+        
+        Args:
+            user_id: User ID
+            days: Number of days to look back
+        
+        Returns:
+            List of insights (empty list if none found)
+        """
+        try:
+            from datetime import datetime, timezone, timedelta
+            
+            # Calculate date range
+            now_utc = datetime.now(timezone.utc)
+            start_utc = now_utc - timedelta(days=days)
+            
+            # Get insights using existing method
+            insights, _ = await self.get_user_activity(user_id, start_utc, now_utc)
+            return insights or []
+            
+        except Exception as e:
+            logger.error(f"Error fetching recent insights for {user_id}: {e}")
+            return []
+
+    def summarize_by_tag(self, insights: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+        """
+        Group insights by tags and create summary.
+        
+        Args:
+            insights: List of insight objects
+        
+        Returns:
+            List of {"name": tag_name, "articles": comma_separated_titles}
+        """
+        try:
+            if not insights:
+                return []
+            
+            tags = {}
+            for insight in insights:
+                insight_tags = insight.get("tags", []) or []
+                insight_title = insight.get("title", "Untitled").strip()
+                
+                if not insight_tags:
+                    # Handle untagged insights
+                    tags.setdefault("Untagged", []).append(insight_title)
+                else:
+                    for tag in insight_tags:
+                        tag_name = tag if isinstance(tag, str) else tag.get("name", "Untagged")
+                        tags.setdefault(tag_name, []).append(insight_title)
+            
+            result = []
+            for tag_name, titles in tags.items():
+                # Limit to first 6 titles and join with commas
+                article_list = ", ".join(titles[:6])
+                result.append({
+                    "name": tag_name,
+                    "articles": article_list
+                })
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error summarizing insights by tag: {e}")
+            return []
+
+    def get_ai_summary(self, insights: List[Dict[str, Any]]) -> str:
+        """
+        Generate AI summary of insights.
+        
+        Args:
+            insights: List of insight objects
+        
+        Returns:
+            AI summary string (empty if no insights or generation fails)
+        """
+        try:
+            if not insights:
+                return ""
+            
+            # For now, return a simple summary
+            # TODO: Implement actual AI summarization
+            insight_count = len(insights)
+            if insight_count == 1:
+                return f"You captured 1 new insight this week. Keep building your knowledge base!"
+            else:
+                return f"You captured {insight_count} new insights this week. Great job expanding your second brain!"
+                
+        except Exception as e:
+            logger.error(f"Error generating AI summary: {e}")
+            return ""
+
+    def get_recommended_content(self, user_id: str) -> tuple[str, str]:
+        """
+        Get recommended tag and articles for user.
+        
+        Args:
+            user_id: User ID
+        
+        Returns:
+            Tuple of (recommended_tag, recommended_articles)
+        """
+        try:
+            # For now, return placeholder content
+            # TODO: Implement actual recommendation logic based on user's interests
+            return ("AI & Technology", "3 trending articles in your interests")
+            
+        except Exception as e:
+            logger.error(f"Error getting recommended content for {user_id}: {e}")
+            return ("", "")
+
         

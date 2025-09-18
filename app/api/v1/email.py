@@ -20,6 +20,7 @@ from ...services.digest_job import DigestJob, DigestJobConfig
 from ...services.digest_content import DigestContentGenerator
 from ...services.digest_time import get_week_boundaries
 from ...services.email_sender import email_sender
+from ...core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +79,83 @@ def render_digest_html(context: dict) -> str:
     """Render digest HTML using Jinja2 template."""
     template = env.get_template("weekly_digest.jinja2")
     return template.render(**context)
+
+def _build_params(user: dict, insights: list) -> dict:
+    """Build template parameters for digest rendering."""
+    from ...services.digest_repo import DigestRepo
+    repo = DigestRepo()
+    
+    tags = repo.summarize_by_tag(insights)
+    ai_summary = repo.get_ai_summary(insights)
+    rec_tag, rec_articles = repo.get_recommended_content(user["id"])
+    
+    return {
+        "tags": tags,  # list of {"name","articles"}
+        "ai_summary": ai_summary,
+        "recommended_tag": rec_tag,
+        "recommended_articles": rec_articles,
+        "login_url": f"{settings.APP_BASE_URL}/login",
+        "unsubscribe_url": f"{settings.UNSUBSCRIBE_BASE_URL}?u={user['id']}",
+    }
+
+def _preview_html(params: dict) -> str:
+    """
+    Build a standalone HTML that mirrors the template structure,
+    but without any template parsing - plain string assembly.
+    """
+    # Build tag blocks
+    tag_blocks = []
+    for tag in (params.get("tags") or []):
+        tag_name = tag.get("name", "Untagged")
+        tag_articles = tag.get("articles", "—")
+        tag_blocks.append(
+            f'''<div style="margin:15px 0;padding:10px;background-color:#f9fafb;border-left:4px solid #2563eb;">
+                 <strong>{tag_name}</strong>: {tag_articles}
+               </div>'''
+        )
+    
+    if not tag_blocks:
+        tag_blocks = ["""<div style="margin:15px 0;padding:10px;background-color:#f9fafb;border-left:4px solid #2563eb;">
+          No tagged items this week—save some insights to see them here next time.
+        </div>"""]
+
+    ai_summary = params.get("ai_summary") or "Your AI summary will appear here once generated."
+    rec_tag = params.get("recommended_tag") or "topics"
+    rec_articles = params.get("recommended_articles") or "—"
+    login_url = params.get("login_url", "#")
+    unsubscribe_url = params.get("unsubscribe_url", "#")
+
+    return f"""<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>Weekly Digest Preview</title></head>
+<body style="margin:0;padding:20px;background:#ffffff;font-family:Arial,Helvetica,sans-serif;line-height:1.6;color:#333;">
+  <div style="max-width:600px;margin:0 auto;">
+    <h2 style="color:#2563eb;margin:0 0 16px;">My Quest Space Weekly Knowledge Digest</h2>
+    <p>Hi there,</p>
+    <p>To better utilize your second brain, please check out the following knowledge review report!</p>
+    <h3 style="color:#1f2937;margin-top:30px;">This Week's Collection:</h3>
+    {''.join(tag_blocks)}
+    <h3 style="color:#1f2937;margin-top:30px;">AI Summary:</h3>
+    <div style="background-color:#f0f9ff;padding:15px;border-radius:8px;margin:15px 0;">{ai_summary}</div>
+    <h3 style="color:#1f2937;margin-top:30px;">This Week's Recommendations:</h3>
+    <p>Your followed <strong>{rec_tag}</strong> featured articles this week: {rec_articles}</p>
+    <div style="text-align:center;margin:40px 0;">
+      <a href="{login_url}" target="_blank" rel="noopener" style="background-color:#2563eb;color:#ffffff;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;">
+        Open Quest – Login to Review Your Knowledge Base
+      </a>
+    </div>
+    <p style="text-align:center;color:#6b7280;font-style:italic;margin-top:30px;">
+      Your second brain is not a storage repository, but a thinking accelerator
+    </p>
+    <hr style="margin:40px 0;border:none;border-top:1px solid #e5e7eb;">
+    <div style="text-align:center;font-size:12px;color:#9ca3af;">
+      <p>
+        <a href="{unsubscribe_url}" target="_blank" rel="noopener" style="color:#6b7280;">Unsubscribe</a> |
+        <a href="mailto:support@quest.example.com" style="color:#6b7280;">Contact Support</a>
+      </p>
+      <p>&copy; 2025 Quest. All rights reserved.</p>
+    </div>
+  </div>
+</body></html>"""
 
 # Dependency to get current user - using the same approach as other routers
 async def get_current_user_id(credentials: HTTPAuthorizationCredentials = Depends(HTTPBearer())) -> str:
@@ -224,72 +302,26 @@ async def update_email_preferences(
         raise HTTPException(status_code=500, detail=f"Failed to update email preferences: {str(e)}")
 
 @router.post("/digest/preview")
-async def digest_preview_post(payload: dict, request: Request, user_id: str = Depends(get_current_user_id), repo: DigestRepo = Depends()):
+async def digest_preview_post(payload: dict, user_id: str = Depends(get_current_user_id)):
     """
     Returns JSON with html_content, for clients that expect JSON.
+    Simplified version that avoids template parsing issues.
     """
     try:
-        # Get user data
-        user_prefs = await repo.get_user_email_preferences(user_id)
-        if not user_prefs:
-            raise HTTPException(status_code=404, detail="User preferences not found")
-        
-        # Get user profile data from database
+        # Get user profile data
+        repo = DigestRepo()
         user_profile = await repo.get_user_profile_data(user_id)
         if not user_profile:
             raise HTTPException(status_code=404, detail="User profile not found")
         
-        # Determine week boundaries
-        now_utc = datetime.now(timezone.utc)
-        week_boundaries = get_week_boundaries(now_utc, user_prefs["timezone"])
-        week_start = week_boundaries["prev_week_start"].date()
+        # Get recent insights (tolerate empty insight sets)
+        insights = await repo.get_recent_insights(user_id, days=7) or []
         
-        # Get user activity for the week
-        start_utc = datetime.combine(week_start, datetime.min.time()).replace(tzinfo=timezone.utc)
-        end_utc = start_utc.replace(hour=23, minute=59, second=59) + timedelta(days=6)
+        # Build parameters using safe methods
+        params = _build_params(user_profile, insights)
         
-        insights, stacks = await repo.get_user_activity(user_id, start_utc, end_utc)
-        
-        # Build tags list from insights and stacks
-        tags_list = []
-        if insights:
-            # Group insights by tags
-            tag_groups = {}
-            for insight in insights:
-                tags = insight.get("tags", []) or []
-                for tag in tags:
-                    if tag not in tag_groups:
-                        tag_groups[tag] = []
-                    tag_groups[tag].append(insight.get("title", "Untitled"))
-            
-            for tag_name, articles in tag_groups.items():
-                tags_list.append({
-                    "name": tag_name,
-                    "articles": ", ".join(articles[:3])  # Limit to first 3
-                })
-        
-        # Build AI summary (placeholder for now)
-        ai_summary = "Weekly insights analysis coming soon!"
-        
-        # Build recommendations (placeholder)
-        rec_tag = "AI & Technology"
-        rec_articles = f"{len(insights)} insights captured"
-        
-        # Build URLs
-        login_url = "https://quest.app/login"
-        unsubscribe_url = f"https://quest.app/unsubscribe?uid={user_id}"
-
-        context = build_context(
-            user_profile=user_profile,
-            user_prefs=user_prefs,
-            tags_list=tags_list,
-            ai_summary=ai_summary,
-            rec_tag=rec_tag,
-            rec_articles=rec_articles,
-            login_url=login_url,
-            unsubscribe_url=unsubscribe_url
-        )
-        html = render_digest_html(context)
+        # Generate simple HTML preview without template parsing
+        html = _preview_html(params)
 
         return JSONResponse({
             "success": True,
@@ -298,7 +330,7 @@ async def digest_preview_post(payload: dict, request: Request, user_id: str = De
                 "html_content": html,
                 "text_content": "",  # optional: convert html->text if you like
                 "payload": {
-                    "tags_count": len(tags_list or []),
+                    "tags_count": len(params.get("tags", [])),
                 }
             }
         }, status_code=200)
@@ -310,81 +342,35 @@ async def digest_preview_post(payload: dict, request: Request, user_id: str = De
         return JSONResponse({"success": False, "message": "Failed to generate HTML preview"}, status_code=500)
 
 @router.get("/digest/preview", response_class=HTMLResponse)
-async def digest_preview_get(request: Request, user_id: str = Depends(get_current_user_id), repo: DigestRepo = Depends()):
+async def digest_preview_get(user_id: str = Depends(get_current_user_id)):
     """
     Returns raw HTML for preview (used by the modal GET path).
+    Simplified version that avoids template parsing issues.
     """
     try:
-        # Get user data
-        user_prefs = await repo.get_user_email_preferences(user_id)
-        if not user_prefs:
-            raise HTTPException(status_code=404, detail="User preferences not found")
-        
-        # Get user profile data from database
+        # Get user profile data
+        repo = DigestRepo()
         user_profile = await repo.get_user_profile_data(user_id)
         if not user_profile:
             raise HTTPException(status_code=404, detail="User profile not found")
         
-        # Determine week boundaries
-        now_utc = datetime.now(timezone.utc)
-        week_boundaries = get_week_boundaries(now_utc, user_prefs["timezone"])
-        week_start = week_boundaries["prev_week_start"].date()
+        # Get recent insights (tolerate empty insight sets)
+        insights = await repo.get_recent_insights(user_id, days=7) or []
         
-        # Get user activity for the week
-        start_utc = datetime.combine(week_start, datetime.min.time()).replace(tzinfo=timezone.utc)
-        end_utc = start_utc.replace(hour=23, minute=59, second=59) + timedelta(days=6)
+        # Build parameters using safe methods
+        params = _build_params(user_profile, insights)
         
-        insights, stacks = await repo.get_user_activity(user_id, start_utc, end_utc)
+        # Generate simple HTML preview without template parsing
+        html = _preview_html(params)
         
-        # Build tags list from insights and stacks
-        tags_list = []
-        if insights:
-            # Group insights by tags
-            tag_groups = {}
-            for insight in insights:
-                tags = insight.get("tags", []) or []
-                for tag in tags:
-                    if tag not in tag_groups:
-                        tag_groups[tag] = []
-                    tag_groups[tag].append(insight.get("title", "Untitled"))
-            
-            for tag_name, articles in tag_groups.items():
-                tags_list.append({
-                    "name": tag_name,
-                    "articles": ", ".join(articles[:3])  # Limit to first 3
-                })
-        
-        # Build AI summary (placeholder for now)
-        ai_summary = "Weekly insights analysis coming soon!"
-        
-        # Build recommendations (placeholder)
-        rec_tag = "AI & Technology"
-        rec_articles = f"{len(insights)} insights captured"
-        
-        # Build URLs
-        login_url = "https://quest.app/login"
-        unsubscribe_url = f"https://quest.app/unsubscribe?uid={user_id}"
-
-        context = build_context(
-            user_profile=user_profile,
-            user_prefs=user_prefs,
-            tags_list=tags_list,
-            ai_summary=ai_summary,
-            rec_tag=rec_tag,
-            rec_articles=rec_articles,
-            login_url=login_url,
-            unsubscribe_url=unsubscribe_url
-        )
-
-        # Empty state safety: always return valid HTML
-        html = render_digest_html(context)
+        # Return HTML with explicit content type
         return HTMLResponse(content=html, status_code=200)
 
     except Exception as e:
         logger.error(f"digest preview GET failed: {e}")
         import traceback
         logger.error(f"Traceback: {traceback.format_exc()}")
-        # return readable HTML even on errors (so the modal doesn't look broken)
+        # Return readable HTML even on errors
         return HTMLResponse(
             content="<html><body style='font-family:Arial;padding:24px'>Failed to generate HTML preview.</body></html>",
             status_code=500
