@@ -281,7 +281,8 @@ class DigestRepo:
         try:
             logger.info(f"🔐 DIGEST REPO: Fetching email preferences for user: {user_id}")
             
-            response = self.supabase.table("email_preferences").select("*").eq("user_id", user_id).execute()
+            # Use service role key for better access
+            response = self.supabase_service.table("email_preferences").select("*").eq("user_id", user_id).execute()
             
             logger.info(f"🔐 DIGEST REPO: Fetch response: {response}")
             logger.info(f"🔐 DIGEST REPO: Response data: {response.data}")
@@ -584,8 +585,8 @@ class DigestRepo:
             User profile data or None
         """
         try:
-            # Get user profile from profiles table
-            response = self.supabase.table("profiles").select(
+            # Get user profile from profiles table using service role key
+            response = self.supabase_service.table("profiles").select(
                 """
                 id,
                 nickname,
@@ -610,8 +611,8 @@ class DigestRepo:
             
             # Also try to get email from auth.users if not in profiles
             if not profile.get("email"):
-                # Try to get from auth.users via RPC or direct query
-                auth_response = self.supabase.table("auth.users").select("email").eq("id", user_id).execute()
+                # Try to get from auth.users via service role key
+                auth_response = self.supabase_service.table("auth.users").select("email").eq("id", user_id).execute()
                 if not hasattr(auth_response, 'error') and auth_response.data:
                     profile["email"] = auth_response.data[0].get("email")
             
