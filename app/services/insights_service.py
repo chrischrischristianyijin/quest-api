@@ -632,31 +632,70 @@ class InsightsService:
                 if not tags_result.get('success'):
                     logger.warning(f"创建insight成功，但标签处理失败: {tags_result.get('message')}")
             
-            # 🚀 优化：直接返回创建的数据，避免额外的数据库查询
-            # 获取标签（如果需要）
-            insight_tags = []
-            if insight_data.tag_ids:
+            # 获取完整的insight数据（包含标签）
+            # 使用 service role 来避免 RLS 权限问题
+            try:
+                response = supabase_service.table('insights').select('*').eq('id', str(insight_id)).execute()
+                
+                if not response.data:
+                    logger.warning(f"刚创建的insight {insight_id} 无法立即查询到，可能是数据库延迟")
+                    # 返回基础创建成功信息
+                    return {
+                        "success": True,
+                        "message": "Insight创建成功",
+                        "data": {
+                            "id": str(insight_id),
+                            "user_id": str(user_id),
+                            "title": insight_data.title,
+                            "description": insight_data.description,
+                            "url": insight_data.url,
+                            "image_url": insight_data.image_url,
+                            "stack_id": insight_data.stack_id,
+                            "tags": []
+                        }
+                    }
+                
+                insight_detail = response.data[0]
+                
+                # 获取标签
                 tags_result = await InsightTagService.get_insight_tags(insight_id, user_id)
                 insight_tags = tags_result.get('data', []) if tags_result.get('success') else []
-            
-            # 构建响应数据（使用创建时的数据，避免额外查询）
-            return {
-                "success": True,
-                "message": "Insight创建成功",
-                "data": {
-                    "id": str(insight_id),
-                    "user_id": str(user_id),
-                    "title": insight_data.title,
-                    "description": insight_data.description,
-                    "url": insight_data.url,
-                    "image_url": insight_data.image_url,
-                    "stack_id": insight_data.stack_id,
-                    "meta": getattr(insight_data, 'meta', None),
-                    "created_at": insight['created_at'],
-                    "updated_at": insight['updated_at'],
-                    "tags": insight_tags
+                
+                # 构建响应数据
+                return {
+                    "success": True,
+                    "message": "Insight创建成功",
+                    "data": {
+                        "id": insight_detail['id'],
+                        "user_id": insight_detail['user_id'],
+                        "title": insight_detail['title'],
+                        "description": insight_detail['description'],
+                        "url": insight_detail.get('url'),
+                        "image_url": insight_detail.get('image_url'),
+                        "stack_id": insight_detail.get('stack_id'),
+                        "meta": insight_detail.get('meta'),
+                        "created_at": insight_detail['created_at'],
+                        "updated_at": insight_detail['updated_at'],
+                        "tags": insight_tags
+                    }
                 }
-            }
+                
+            except Exception as get_error:
+                logger.error(f"获取刚创建的insight失败: {get_error}")
+                # 即使获取失败，也返回创建成功信息
+                return {
+                    "success": True,
+                    "message": "Insight创建成功（详情获取失败）",
+                    "data": {
+                        "id": str(insight_id),
+                        "user_id": str(user_id),
+                        "title": insight_data.title,
+                        "description": insight_data.description,
+                        "url": insight_data.url,
+                        "image_url": insight_data.image_url,
+                        "tags": []
+                    }
+                }
             
         except Exception as e:
             logger.error(f"创建insight失败: {str(e)}")

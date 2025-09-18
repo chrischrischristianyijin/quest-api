@@ -171,12 +171,15 @@ async def create_insight(
         current_user = await auth_service.get_current_user(credentials.credentials)
         
         # 从URL提取metadata（统一使用utils）- 可选，失败不阻断创建
-        # 🚀 优化：使用后台任务异步提取metadata，不阻塞主流程
-        metadata = {
-            "title": insight.title or "无标题",
-            "description": "",
-            "image_url": None
-        }
+        try:
+            metadata = await utils_extract_metadata_from_url(insight.url)
+        except Exception as fetch_err:
+            logger.warning(f"提取metadata失败，将使用占位信息继续创建: {fetch_err}")
+            metadata = {
+                "title": "无标题",
+                "description": "",
+                "image_url": None
+            }
         
         # 创建完整的insight数据
         # 优先使用用户自定义标题，如果没有则使用提取的标题
@@ -206,16 +209,6 @@ async def create_insight(
         insights_service = InsightsService()
         result = await insights_service.create_insight(insight_data, UUID(current_user["id"]))
         
-        # 🚀 优化：创建成功后，启动后台任务提取完整metadata
-        if result.get("success") and result.get("data", {}).get("id"):
-            insight_id = result["data"]["id"]
-            try:
-                import asyncio
-                asyncio.create_task(self._extract_metadata_background(insight.url, insight_id))
-                logger.info(f"已启动metadata提取后台任务: {insight_id}")
-            except Exception as fetch_err:
-                logger.warning(f"启动metadata提取后台任务失败: {fetch_err}")
-        
         if not result.get("success"):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -226,33 +219,6 @@ async def create_insight(
     except Exception as e:
         logger.error(f"创建见解失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-    async def _extract_metadata_background(self, url: str, insight_id: str):
-        """后台异步提取metadata并更新insight"""
-        try:
-            logger.info(f"[后台任务] 开始提取metadata: {url}")
-            metadata = await utils_extract_metadata_from_url(url)
-            
-            # 更新insight的metadata
-            from app.core.database import get_supabase_service
-            supabase_service = get_supabase_service()
-            
-            update_data = {
-                'title': metadata.get('title'),
-                'description': metadata.get('description'),
-                'image_url': metadata.get('image_url'),
-                'meta': metadata
-            }
-            
-            response = supabase_service.table('insights').update(update_data).eq('id', insight_id).execute()
-            
-            if hasattr(response, 'error') and response.error:
-                logger.warning(f"[后台任务] 更新metadata失败: {response.error}")
-            else:
-                logger.info(f"[后台任务] metadata更新成功: {url}")
-                
-        except Exception as e:
-            logger.warning(f"[后台任务] metadata提取失败: {e}")
 
 @router.get("/debug/stack-ids")
 async def debug_stack_ids(
