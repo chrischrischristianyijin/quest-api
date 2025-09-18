@@ -391,20 +391,67 @@ class TestEmailRequest(BaseModel):
 @router.post("/test")
 async def send_test_email(
     request: TestEmailRequest,
-    user_id: str = Depends(get_current_user_id)
+    user_id: str = Depends(get_current_user_id),
+    repo: DigestRepo = Depends()
 ):
-    """Send a test email to verify configuration."""
+    """Send a test digest email with real user data."""
     try:
-        email_sender_instance = email_sender()  # Get the instance
-        result = await email_sender_instance.send_test_email(request.email)
+        logger.info(f"🧪 TEST EMAIL: Generating test digest for user: {user_id}")
+        
+        # Get user data
+        user_prefs = await repo.get_user_email_preferences(user_id)
+        if not user_prefs:
+            raise HTTPException(status_code=404, detail="User preferences not found")
+        
+        # Get user profile data from database
+        user_profile = await repo.get_user_profile_data(user_id)
+        if not user_profile:
+            raise HTTPException(status_code=404, detail="User profile not found")
+        
+        # Combine user profile with preferences
+        user_data = {
+            "id": user_profile["id"],
+            "email": user_profile["email"],
+            "first_name": user_profile["first_name"],
+            "nickname": user_profile.get("nickname"),
+            "username": user_profile.get("username"),
+            "avatar_url": user_profile.get("avatar_url"),
+            "timezone": user_prefs["timezone"]
+        }
+        
+        logger.info(f"🧪 TEST EMAIL: User data prepared for {user_data.get('first_name', 'User')}")
+        
+        # Generate digest content using the same logic as preview
+        from app.services.digest_content import DigestContentService
+        content_service = DigestContentService()
+        digest_payload = await content_service.build_user_digest_payload(user_data, user_prefs)
+        
+        logger.info(f"🧪 TEST EMAIL: Digest payload generated with {len(digest_payload.get('insights', []))} insights")
+        
+        # Send the actual digest email to the test address
+        from app.services.digest_job import DigestJobService
+        job_service = DigestJobService()
+        
+        # Override the email address for testing
+        test_user_data = user_data.copy()
+        test_user_data["email"] = request.email
+        
+        result = await job_service.send_digest_email(test_user_data, digest_payload)
+        
         return {
             "success": result["success"],
-            "message": "Test email sent" if result["success"] else "Failed to send test email",
-            "details": result
+            "message": f"Test digest email sent to {request.email}" if result["success"] else "Failed to send test digest",
+            "details": {
+                "insights_count": len(digest_payload.get('insights', [])),
+                "user_name": user_data.get('first_name', 'User'),
+                "test_email": request.email
+            }
         }
     except Exception as e:
-        logger.error(f"Error sending test email: {e}")
-        raise HTTPException(status_code=500, detail="Failed to send test email")
+        logger.error(f"🧪 TEST EMAIL: ❌ Error sending test digest: {e}")
+        import traceback
+        logger.error(f"🧪 TEST EMAIL: ❌ Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Failed to send test digest: {str(e)}")
 
 @router.post("/webhooks/brevo")
 async def brevo_webhook(
