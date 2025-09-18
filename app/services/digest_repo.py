@@ -275,17 +275,27 @@ class DigestRepo:
             Email preferences or None
         """
         try:
+            logger.info(f"🔐 DIGEST REPO: Fetching email preferences for user: {user_id}")
+            
             response = self.supabase.table("email_preferences").select("*").eq("user_id", user_id).execute()
             
+            logger.info(f"🔐 DIGEST REPO: Fetch response: {response}")
+            logger.info(f"🔐 DIGEST REPO: Response data: {response.data}")
+            logger.info(f"🔐 DIGEST REPO: Response count: {response.count}")
+            
             if hasattr(response, 'error') and response.error:
-                logger.error(f"Error fetching email preferences for user {user_id}: {response.error}")
+                logger.error(f"🔐 DIGEST REPO: ❌ Supabase error fetching email preferences for user {user_id}: {response.error}")
                 return None
             
             data = response.data or []
-            return data[0] if data else None
+            result = data[0] if data else None
+            logger.info(f"🔐 DIGEST REPO: Returning preferences: {result}")
+            return result
             
         except Exception as e:
-            logger.error(f"Error fetching email preferences for user {user_id}: {e}")
+            logger.error(f"🔐 DIGEST REPO: ❌ Exception fetching email preferences for user {user_id}: {e}")
+            import traceback
+            logger.error(f"🔐 DIGEST REPO: ❌ Traceback: {traceback.format_exc()}")
             return None
     
     async def create_default_email_preferences(self, user_id: str) -> bool:
@@ -299,6 +309,8 @@ class DigestRepo:
             True if successful
         """
         try:
+            logger.info(f"🔐 DIGEST REPO: Creating default email preferences for user: {user_id}")
+            
             default_preferences = {
                 "user_id": user_id,
                 "weekly_digest_enabled": True,
@@ -308,17 +320,29 @@ class DigestRepo:
                 "no_activity_policy": "brief"
             }
             
+            logger.info(f"🔐 DIGEST REPO: Default preferences data: {default_preferences}")
+            
             response = self.supabase.table("email_preferences").insert(default_preferences).execute()
             
+            logger.info(f"🔐 DIGEST REPO: Supabase response: {response}")
+            logger.info(f"🔐 DIGEST REPO: Response data: {response.data}")
+            logger.info(f"🔐 DIGEST REPO: Response count: {response.count}")
+            
             if hasattr(response, 'error') and response.error:
-                logger.error(f"Error creating default email preferences for user {user_id}: {response.error}")
+                logger.error(f"🔐 DIGEST REPO: ❌ Supabase error creating default email preferences for user {user_id}: {response.error}")
                 return False
             
-            logger.info(f"Created default email preferences for user {user_id}")
+            if not response.data:
+                logger.error(f"🔐 DIGEST REPO: ❌ No data returned from insert operation for user {user_id}")
+                return False
+            
+            logger.info(f"🔐 DIGEST REPO: ✅ Created default email preferences for user {user_id}")
             return True
             
         except Exception as e:
-            logger.error(f"Error creating default email preferences for user {user_id}: {e}")
+            logger.error(f"🔐 DIGEST REPO: ❌ Exception creating default email preferences for user {user_id}: {e}")
+            import traceback
+            logger.error(f"🔐 DIGEST REPO: ❌ Traceback: {traceback.format_exc()}")
             return False
     
     async def update_user_email_preferences(
