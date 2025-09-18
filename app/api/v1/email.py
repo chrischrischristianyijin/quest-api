@@ -48,6 +48,7 @@ async def get_current_user_id(request: Request) -> str:
         import jwt as pyjwt
         JWTError = pyjwt.InvalidTokenError
     import os
+    from ...core.config import settings
     
     # Get the Authorization header
     auth_header = request.headers.get("Authorization")
@@ -57,9 +58,12 @@ async def get_current_user_id(request: Request) -> str:
     token = auth_header.split(" ")[1]
     
     try:
-        # Decode JWT token (you may need to adjust this based on your JWT secret)
-        # For now, we'll use a simple approach - you might need to get the secret from your config
-        payload = jwt.decode(token, options={"verify_signature": False})
+        # Decode JWT token with proper verification
+        payload = jwt.decode(
+            token, 
+            settings.JWT_SECRET_KEY, 
+            algorithms=[settings.JWT_ALGORITHM]
+        )
         user_id = payload.get("sub") or payload.get("user_id")
         
         if not user_id:
