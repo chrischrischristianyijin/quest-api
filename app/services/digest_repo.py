@@ -654,15 +654,14 @@ class DigestRepo:
         try:
             from datetime import datetime, timezone, timedelta
             
-            # Calculate date range
+            # 1) Compute window in UTC
             now_utc = datetime.now(timezone.utc)
             start_utc = now_utc - timedelta(days=days)
             
             logger.info(f"📧 EMAIL DIGEST: Fetching insights for user {user_id} from {start_utc.isoformat()} to {now_utc.isoformat()}")
             
-            # Use the same query pattern as the working MySpace API
-            # Get insights created OR updated in the time window (use created_at as primary filter)
-            insights_response = self.supabase.table("insights").select(
+            # 2) Use the same SELECT signature as insights_service.py (WORKING PATTERN)
+            query = self.supabase.table("insights").select(
                 """
                 id,
                 title,
@@ -678,16 +677,45 @@ class DigestRepo:
                     thought
                 )
                 """
-            ).eq("user_id", user_id).gte("created_at", start_utc.isoformat()).lt("created_at", now_utc.isoformat()).order("created_at", desc=True).execute()
+            ).eq("user_id", user_id).order("created_at", desc=True)
             
-            if hasattr(insights_response, 'error') and insights_response.error:
-                logger.error(f"📧 EMAIL DIGEST: Error fetching insights for user {user_id}: {insights_response.error}")
+            # 3) Execute without SQL date filters (mirrors working MySpace pattern)
+            resp = query.execute()
+            if hasattr(resp, "error") and resp.error:
+                logger.error(f"📧 EMAIL DIGEST: Error fetching insights for user {user_id}: {resp.error}")
                 return []
             
-            insights = insights_response.data or []
-            logger.info(f"📧 EMAIL DIGEST: Found {len(insights)} insights for user {user_id}")
+            rows = resp.data or []
+            logger.info(f"📧 EMAIL DIGEST: Retrieved {len(rows)} total insights for user {user_id}")
             
-            return insights
+            # 4) Filter in Python: include items created OR updated within window
+            def _parse_dt(s: str) -> datetime:
+                # Handle "Z" and timezone-aware strings robustly
+                if not s:
+                    return None
+                try:
+                    # Normalize trailing 'Z'
+                    if s.endswith("Z"):
+                        s = s[:-1] + "+00:00"
+                    return datetime.fromisoformat(s)
+                except Exception:
+                    return None
+            
+            recent = []
+            for it in rows:
+                c = _parse_dt(it.get("created_at"))
+                u = _parse_dt(it.get("updated_at"))
+                # Use created_at primarily, fall back to updated_at; count either if within window
+                in_window = False
+                if c and c >= start_utc:
+                    in_window = True
+                elif u and u >= start_utc:
+                    in_window = True
+                if in_window:
+                    recent.append(it)
+            
+            logger.info(f"📧 EMAIL DIGEST: Found {len(recent)} insights for user {user_id} in last {days} days")
+            return recent
             
         except Exception as e:
             logger.error(f"Error fetching recent insights for {user_id}: {e}")
