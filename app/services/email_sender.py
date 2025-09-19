@@ -296,10 +296,8 @@ class EmailSender:
             # Use template ID from env or parameter
             template_id = template_id or int(os.getenv("BREVO_TEMPLATE_ID", "0"))
             if not template_id:
-                return {
-                    "success": False,
-                    "error": "BREVO_TEMPLATE_ID environment variable is required"
-                }
+                # Fallback: send HTML directly without template
+                return await self._send_digest_html_direct(to_email, to_name, template_params)
             
             # Prepare email payload
             email_data = {
@@ -349,6 +347,144 @@ class EmailSender:
         except Exception as e:
             error_msg = f"Brevo digest send failed: {str(e)}"
             logger.error(f"Brevo digest send failed for {to_email}: {error_msg}")
+            return {
+                "success": False,
+                "error": error_msg,
+                "to_email": to_email,
+                "sent_at": datetime.utcnow().isoformat()
+            }
+    
+    async def _send_digest_html_direct(
+        self,
+        to_email: str,
+        to_name: str,
+        template_params: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Send digest email with HTML directly (fallback when no template ID).
+        """
+        try:
+            # Extract params
+            params = template_params.get("params", {})
+            tags = params.get("tags", [])
+            ai_summary = params.get("ai_summary", "Your AI summary will appear here once generated.")
+            login_url = params.get("login_url", "https://myquestspace.com/login")
+            unsubscribe_url = params.get("unsubscribe_url", "#")
+            
+            # Build tag blocks
+            tag_blocks = []
+            for tag in tags:
+                tag_name = tag.get("name", "Untagged")
+                tag_articles = tag.get("articles", "No articles")
+                tag_blocks.append(f"""
+                <div style="margin:15px 0;padding:10px;background-color:#f9fafb;border-left:4px solid #2563eb;">
+                    <strong>{tag_name}</strong>: {tag_articles}
+                </div>
+                """)
+            
+            if not tag_blocks:
+                tag_blocks.append("""
+                <div style="margin:15px 0;padding:10px;background-color:#f9fafb;border-left:4px solid #2563eb;">
+                    No tagged items this week—save some insights to see them here next time.
+                </div>
+                """)
+            
+            # Build complete HTML
+            html_content = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <title>Weekly Digest</title>
+            </head>
+            <body style="margin:0;padding:20px;background:#ffffff;font-family:Arial,sans-serif;line-height:1.6;color:#333;">
+                <div style="max-width:600px;margin:0 auto;">
+                    <h2 style="color:#2563eb;margin:0 0 16px;">My Quest Space Weekly Knowledge Digest</h2>
+                    <p>Hi {to_name},</p>
+                    <p>To better utilize your second brain, please check out the following knowledge review report!</p>
+                    
+                    <h3 style="color:#1f2937;margin-top:30px;">This Week's Collection:</h3>
+                    {''.join(tag_blocks)}
+                    
+                    <h3 style="color:#1f2937;margin-top:30px;">AI Summary:</h3>
+                    <div style="background-color:#f0f9ff;padding:15px;border-radius:8px;margin:15px 0;">
+                        {ai_summary}
+                    </div>
+                    
+                    <div style="text-align:center;margin:40px 0;">
+                        <a href="{login_url}" target="_blank" rel="noopener" 
+                           style="background-color:#2563eb;color:#ffffff;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;">
+                            Open Quest – Login to Review Your Knowledge Base
+                        </a>
+                    </div>
+                    
+                    <p style="text-align:center;color:#6b7280;font-style:italic;margin-top:30px;">
+                        Your second brain is not a storage repository, but a thinking accelerator
+                    </p>
+                    
+                    <hr style="margin:40px 0;border:none;border-top:1px solid #e5e7eb;">
+                    <div style="text-align:center;font-size:12px;color:#9ca3af;">
+                        <p>
+                            <a href="{unsubscribe_url}" target="_blank" rel="noopener" style="color:#6b7280;">Unsubscribe</a> |
+                            <a href="mailto:support@quest.example.com" style="color:#6b7280;">Contact Support</a>
+                        </p>
+                        <p>&copy; 2025 Quest. All rights reserved.</p>
+                    </div>
+                </div>
+            </body>
+            </html>
+            """
+            
+            # Send via Brevo API with HTML content
+            email_data = {
+                "sender": {
+                    "name": self.sender_name,
+                    "email": self.sender_email
+                },
+                "to": [{"email": to_email, "name": to_name}],
+                "subject": "My Quest Space Weekly Knowledge Digest",
+                "htmlContent": html_content,
+                "headers": {
+                    "X-Quest-Digest": "weekly",
+                    "X-Quest-User": to_email
+                },
+                "tags": ["quest-weekly-digest"]
+            }
+            
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"{self.base_url}/smtp/email",
+                    headers={
+                        "api-key": self.api_key,
+                        "accept": "application/json",
+                        "content-type": "application/json"
+                    },
+                    json=email_data
+                )
+                
+                response.raise_for_status()
+                result = response.json()
+                
+                message_id = result.get("messageId", "")
+                
+                logger.info("brevo_send_ok", extra={
+                    "message_id": message_id,
+                    "to": to_email,
+                    "method": "html_direct",
+                    "digest_type": "weekly"
+                })
+                
+                return {
+                    "success": True,
+                    "message_id": message_id,
+                    "to_email": to_email,
+                    "sent_at": datetime.utcnow().isoformat(),
+                    "method": "html_direct"
+                }
+                
+        except Exception as e:
+            error_msg = f"Direct HTML digest send failed: {str(e)}"
+            logger.error(f"Direct HTML digest send failed for {to_email}: {error_msg}")
             return {
                 "success": False,
                 "error": error_msg,
