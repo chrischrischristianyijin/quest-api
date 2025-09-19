@@ -658,9 +658,36 @@ class DigestRepo:
             now_utc = datetime.now(timezone.utc)
             start_utc = now_utc - timedelta(days=days)
             
-            # Get insights using existing method
-            insights, _ = await self.get_user_activity(user_id, start_utc, now_utc)
-            return insights or []
+            logger.info(f"📧 EMAIL DIGEST: Fetching insights for user {user_id} from {start_utc.isoformat()} to {now_utc.isoformat()}")
+            
+            # Use the same query pattern as the working MySpace API
+            # Get insights created OR updated in the time window (use created_at as primary filter)
+            insights_response = self.supabase.table("insights").select(
+                """
+                id,
+                title,
+                description,
+                url,
+                image_url,
+                created_at,
+                updated_at,
+                tags,
+                stack_id,
+                insight_contents(
+                    summary,
+                    thought
+                )
+                """
+            ).eq("user_id", user_id).gte("created_at", start_utc.isoformat()).lt("created_at", now_utc.isoformat()).order("created_at", desc=True).execute()
+            
+            if hasattr(insights_response, 'error') and insights_response.error:
+                logger.error(f"📧 EMAIL DIGEST: Error fetching insights for user {user_id}: {insights_response.error}")
+                return []
+            
+            insights = insights_response.data or []
+            logger.info(f"📧 EMAIL DIGEST: Found {len(insights)} insights for user {user_id}")
+            
+            return insights
             
         except Exception as e:
             logger.error(f"Error fetching recent insights for {user_id}: {e}")

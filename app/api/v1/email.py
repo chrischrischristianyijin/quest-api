@@ -95,11 +95,25 @@ def _summarize_by_tag(insights: List[Dict[str, Any]]) -> List[Dict[str, str]]:
     tags_map: Dict[str, List[str]] = {}
     for it in _safe_list(insights):
         title = _safe_str(it.get("title")) or "Untitled"
-        for t in _safe_list(it.get("tags")):
-            name = _safe_str(t.get("name")) or "Untagged"
-            tags_map.setdefault(name, []).append(title)
-    # output: [{name, articles}]
-    return [{"name": k, "articles": ", ".join(v[:6])} for k, v in tags_map.items()]
+        insight_tags = _safe_list(it.get("tags"))
+        
+        # Debug logging
+        logger.info(f"📧 TAG DEBUG: Processing insight '{title}' with tags: {insight_tags}")
+        
+        if not insight_tags:
+            # Handle insights without tags
+            tags_map.setdefault("Untagged", []).append(title)
+        else:
+            for t in insight_tags:
+                name = _safe_str(t.get("name")) if isinstance(t, dict) else _safe_str(t)
+                if not name:
+                    name = "Untagged"
+                tags_map.setdefault(name, []).append(title)
+                logger.info(f"📧 TAG DEBUG: Added '{title}' to tag '{name}'")
+    
+    result = [{"name": k, "articles": ", ".join(v[:6])} for k, v in tags_map.items()]
+    logger.info(f"📧 TAG DEBUG: Final tags summary: {result}")
+    return result
 
 def _build_params(user: dict, insights: list) -> dict:
     """Build template parameters for digest rendering with defensive programming."""
@@ -661,10 +675,17 @@ async def test_send_digest(
         # Get recent insights
         insights = await repo.get_recent_insights(user_id, days=7) or []
         has_insights = len(insights) > 0
+        
+        # Debug logging
+        logger.info(f"📧 EMAIL DIGEST DEBUG: user_id={user_id}, insights_count={len(insights)}, has_insights={has_insights}")
+        logger.info(f"📧 EMAIL DIGEST DEBUG: force={force}, dry_run={dry_run}")
+        if insights:
+            logger.info(f"📧 EMAIL DIGEST DEBUG: Sample insight: {insights[0]}")
 
         # Make decision
         now_utc = datetime.now(timezone.utc)
         decision = should_send_weekly_digest(now_utc, prefs, has_insights)
+        logger.info(f"📧 EMAIL DIGEST DEBUG: decision={decision}, prefs={prefs}")
 
         will_send = force or decision
         
