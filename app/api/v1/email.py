@@ -6,7 +6,7 @@ import logging
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional
 from pathlib import Path
-from fastapi import APIRouter, HTTPException, Depends, Request, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Depends, Request, BackgroundTasks, Query
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
@@ -19,8 +19,10 @@ from ...services.digest_repo import DigestRepo
 from ...services.digest_job import DigestJob, DigestJobConfig
 from ...services.digest_content import DigestContentGenerator
 from ...services.digest_time import get_week_boundaries
-from ...services.email_sender import email_sender
+from ...services.email_sender import email_sender, EmailPrefs, should_send_weekly_digest
 from ...core.config import settings
+from typing import Any, Dict, List
+import pytz
 
 logger = logging.getLogger(__name__)
 
@@ -80,22 +82,54 @@ def render_digest_html(context: dict) -> str:
     template = env.get_template("weekly_digest.jinja2")
     return template.render(**context)
 
+def _safe_list(x) -> List[Any]:
+    """Safely convert to list, handling None and other types."""
+    return x if isinstance(x, list) else []
+
+def _safe_str(x) -> str:
+    """Safely convert to string, handling None and other types."""
+    return x if isinstance(x, str) else ""
+
+def _summarize_by_tag(insights: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+    """Safely summarize insights by tag with defensive programming."""
+    tags_map: Dict[str, List[str]] = {}
+    for it in _safe_list(insights):
+        title = _safe_str(it.get("title")) or "Untitled"
+        for t in _safe_list(it.get("tags")):
+            name = _safe_str(t.get("name")) or "Untagged"
+            tags_map.setdefault(name, []).append(title)
+    # output: [{name, articles}]
+    return [{"name": k, "articles": ", ".join(v[:6])} for k, v in tags_map.items()]
+
 def _build_params(user: dict, insights: list) -> dict:
-    """Build template parameters for digest rendering."""
+    """Build template parameters for digest rendering with defensive programming."""
     from ...services.digest_repo import DigestRepo
     repo = DigestRepo()
     
-    tags = repo.summarize_by_tag(insights)
-    ai_summary = repo.get_ai_summary(insights)
-    rec_tag, rec_articles = repo.get_recommended_content(user["id"])
+    # Use safe summarization
+    tags = _summarize_by_tag(insights)
+    
+    # Keep AI summary/recommendation defensive if repo returns None
+    try:
+        ai_summary = _safe_str(repo.get_ai_summary(insights))
+    except Exception:
+        ai_summary = ""
+    
+    try:
+        rec = repo.get_recommended_content(user.get("id"))
+        if not isinstance(rec, tuple) or len(rec) != 2:
+            rec = ("", "")
+    except Exception:
+        rec = ("", "")
+    rec_tag, rec_articles = rec
     
     return {
         "tags": tags,  # list of {"name","articles"}
         "ai_summary": ai_summary,
-        "recommended_tag": rec_tag,
-        "recommended_articles": rec_articles,
+        "recommended_tag": _safe_str(rec_tag),
+        "recommended_articles": _safe_str(rec_articles),
         "login_url": f"{settings.APP_BASE_URL}/login",
-        "unsubscribe_url": f"{settings.UNSUBSCRIBE_BASE_URL}?u={user['id']}",
+        "unsubscribe_url": f"{settings.UNSUBSCRIBE_BASE_URL}?u={_safe_str(user.get('id'))}",
     }
 
 def _preview_html(params: dict) -> str:
@@ -103,27 +137,27 @@ def _preview_html(params: dict) -> str:
     Build a standalone HTML that mirrors the template structure,
     but without any template parsing - plain string assembly.
     """
-    # Build tag blocks
-    tag_blocks = []
-    for tag in (params.get("tags") or []):
-        tag_name = tag.get("name", "Untagged")
-        tag_articles = tag.get("articles", "—")
+    # Build tag blocks with safe helpers
+    tag_blocks: List[str] = []
+    for t in _safe_list(params.get("tags")):
+        nm = _safe_str(t.get("name")) or "Untagged"
+        arts = _safe_str(t.get("articles")) or "—"
         tag_blocks.append(
             f'''<div style="margin:15px 0;padding:10px;background-color:#f9fafb;border-left:4px solid #2563eb;">
-                 <strong>{tag_name}</strong>: {tag_articles}
-               </div>'''
+  <strong>{nm}</strong>: {arts}
+</div>'''
         )
     
     if not tag_blocks:
         tag_blocks = ["""<div style="margin:15px 0;padding:10px;background-color:#f9fafb;border-left:4px solid #2563eb;">
-          No tagged items this week—save some insights to see them here next time.
-        </div>"""]
+No tagged items this week—save some insights to see them here next time.
+</div>"""]
 
-    ai_summary = params.get("ai_summary") or "Your AI summary will appear here once generated."
-    rec_tag = params.get("recommended_tag") or "topics"
-    rec_articles = params.get("recommended_articles") or "—"
-    login_url = params.get("login_url", "#")
-    unsubscribe_url = params.get("unsubscribe_url", "#")
+    ai_summary = _safe_str(params.get("ai_summary")) or "Your AI summary will appear here once generated."
+    rec_tag = _safe_str(params.get("recommended_tag")) or "topics"
+    rec_articles = _safe_str(params.get("recommended_articles")) or "—"
+    login_url = _safe_str(params.get("login_url")) or "#"
+    unsubscribe_url = _safe_str(params.get("unsubscribe_url")) or "#"
 
     return f"""<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>Weekly Digest Preview</title></head>
@@ -341,18 +375,19 @@ async def digest_preview_post(payload: dict, user_id: str = Depends(get_current_
         logger.error(f"Traceback: {traceback.format_exc()}")
         return JSONResponse({"success": False, "message": "Failed to generate HTML preview"}, status_code=500)
 
-@router.get("/digest/preview", response_class=HTMLResponse)
+@router.get("/digest/preview")
 async def digest_preview_get(user_id: str = Depends(get_current_user_id)):
     """
-    Returns raw HTML for preview (used by the modal GET path).
-    Simplified version that avoids template parsing issues.
+    Returns JSON with html field for preview (used by the modal GET path).
+    Hardened version that never 500s and always returns JSON.
     """
     try:
         # Get user profile data
         repo = DigestRepo()
         user_profile = await repo.get_user_profile_data(user_id)
         if not user_profile:
-            raise HTTPException(status_code=404, detail="User profile not found")
+            # Return safe fallback instead of 404
+            user_profile = {"id": user_id, "first_name": "User"}
         
         # Get recent insights (tolerate empty insight sets)
         insights = await repo.get_recent_insights(user_id, days=7) or []
@@ -363,18 +398,23 @@ async def digest_preview_get(user_id: str = Depends(get_current_user_id)):
         # Generate simple HTML preview without template parsing
         html = _preview_html(params)
         
-        # Return HTML with explicit content type
-        return HTMLResponse(content=html, status_code=200)
+        return JSONResponse({"ok": True, "html": html, "params": params}, status_code=200)
 
     except Exception as e:
         logger.error(f"digest preview GET failed: {e}")
         import traceback
         logger.error(f"Traceback: {traceback.format_exc()}")
-        # Return readable HTML even on errors
-        return HTMLResponse(
-            content="<html><body style='font-family:Arial;padding:24px'>Failed to generate HTML preview.</body></html>",
-            status_code=500
-        )
+        
+        # NEVER 500 — return a safe fallback
+        fallback = _preview_html({
+            "tags": [],
+            "ai_summary": "",
+            "recommended_tag": "",
+            "recommended_articles": "",
+            "login_url": f"{settings.APP_BASE_URL}/login",
+            "unsubscribe_url": f"{settings.UNSUBSCRIBE_BASE_URL}?u={_safe_str(user_id)}",
+        })
+        return JSONResponse({"ok": False, "html": fallback, "error": str(e)}, status_code=200)
 
 @router.post("/unsubscribe")
 async def unsubscribe_user(
@@ -566,6 +606,94 @@ async def send_test_email(
         import traceback
         logger.error(f"🧪 TEST EMAIL: ❌ Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Failed to send test digest: {str(e)}")
+
+@router.post("/digest/test-send")
+async def test_send_digest(
+    force: bool = Query(False),
+    dry_run: bool = Query(True),
+    email_override: Optional[str] = Query(None),
+    user_id: str = Depends(get_current_user_id)
+):
+    """
+    Test endpoint for digest sending logic.
+    
+    - dry_run=True: build everything but don't call Brevo
+    - force=True: ignore schedule and send decision
+    - email_override: send to this email instead of user's email (for testing)
+    """
+    try:
+        repo = DigestRepo()
+        
+        # Get user preferences
+        prefs_raw = await repo.get_user_email_preferences(user_id)
+        if not prefs_raw:
+            # Create default preferences if none exist
+            await repo.create_default_email_preferences(user_id)
+            prefs_raw = await repo.get_user_email_preferences(user_id)
+        
+        # Convert to EmailPrefs dataclass
+        prefs = EmailPrefs(
+            weekly_digest_enabled=prefs_raw.get("weekly_digest_enabled", True),
+            preferred_day=int(prefs_raw.get("preferred_day", 0)),
+            preferred_hour=int(prefs_raw.get("preferred_hour", 9)),
+            timezone=prefs_raw.get("timezone", "UTC"),
+            no_activity_policy=prefs_raw.get("no_activity_policy", "skip"),
+        )
+
+        # Get recent insights
+        insights = await repo.get_recent_insights(user_id, days=7) or []
+        has_insights = len(insights) > 0
+
+        # Make decision
+        now_utc = datetime.now(timezone.utc)
+        decision = should_send_weekly_digest(now_utc, prefs, has_insights)
+
+        will_send = force or decision
+        
+        result = {
+            "decision": decision,
+            "forced": force,
+            "will_send": will_send,
+            "prefs": prefs_raw,
+            "stats": {
+                "insights_count": len(insights),
+                "has_insights": has_insights,
+            },
+            "mode": "dry_run" if dry_run else "real_send",
+            "email_override": email_override,
+            "current_time_utc": now_utc.isoformat(),
+            "current_time_local": now_utc.astimezone(pytz.timezone(prefs.timezone)).isoformat(),
+        }
+
+        if not will_send:
+            return JSONResponse({"ok": True, **result, "note": "Skipped by schedule/no_activity policy."}, 200)
+
+        # Build template params
+        user_profile = await repo.get_user_profile_data(user_id)
+        if not user_profile:
+            user_profile = {"id": user_id, "first_name": "User"}
+        
+        params = _build_params(user_profile, insights)
+        result["params_sample"] = {k: (v if k != "tags" else v[:2]) for k, v in params.items()}
+
+        if dry_run:
+            return JSONResponse({"ok": True, **result, "note": "Dry run only. No email sent."}, 200)
+
+        # Real send
+        email_sender_instance = email_sender()
+        send_result = await email_sender_instance.send_brevo_digest(
+            to_email=email_override or user_profile.get("email", "test@example.com"),
+            to_name=user_profile.get("first_name", "User"),
+            template_params={"params": params},  # Wrap under "params" to match Brevo template
+        )
+        
+        return JSONResponse({"ok": True, **result, "send_result": send_result}, 200)
+
+    except Exception as e:
+        logger.error(f"Test send digest failed: {e}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return JSONResponse({"ok": False, "error": str(e)}, 500)
 
 @router.post("/webhooks/brevo")
 async def brevo_webhook(

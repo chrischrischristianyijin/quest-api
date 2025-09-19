@@ -5,13 +5,61 @@ Handles email delivery, error handling, and deliverability tracking.
 import os
 import httpx
 import logging
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Literal
 from datetime import datetime
 import json
 import hashlib
 import secrets
+import pytz
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
+
+# Email preferences and decision logic
+NoActivityPolicy = Literal["skip", "brief", "suggestions"]
+
+@dataclass
+class EmailPrefs:
+    weekly_digest_enabled: bool
+    preferred_day: int           # 0=Mon ... 6=Sun  (Python weekday)
+    preferred_hour: int          # 0..23
+    timezone: str                # e.g. "Asia/Tokyo"
+    no_activity_policy: NoActivityPolicy  # "skip" | "brief" | "suggestions"
+
+def should_send_weekly_digest(
+    now_utc: datetime,
+    prefs: EmailPrefs,
+    has_insights: bool,
+) -> bool:
+    """
+    Return True iff we should send right now.
+    
+    Args:
+        now_utc: Current UTC datetime
+        prefs: User email preferences
+        has_insights: Whether user has recent insights
+    
+    Returns:
+        True if should send, False otherwise
+    """
+    if not prefs.weekly_digest_enabled:
+        return False
+
+    tz = pytz.timezone(prefs.timezone or "UTC")
+    now_local = now_utc.astimezone(tz)
+
+    # Match exact hour + weekday in user's TZ
+    weekday_match = now_local.weekday() == prefs.preferred_day
+    hour_match = now_local.hour == prefs.preferred_hour
+
+    if not (weekday_match and hour_match):
+        return False
+
+    # No activity policy
+    if not has_insights and prefs.no_activity_policy == "skip":
+        return False
+
+    return True
 
 class EmailSender:
     """Handles email sending via Brevo API."""
@@ -217,6 +265,95 @@ class EmailSender:
                 "to_email": to_email,
                 "sent_at": datetime.utcnow().isoformat(),
                 "template_id": template_id
+            }
+    
+    async def send_brevo_digest(
+        self,
+        to_email: str,
+        to_name: str,
+        template_params: Dict[str, Any],
+        template_id: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        Send a weekly digest using Brevo template with structured logging.
+        
+        Args:
+            to_email: Recipient email address
+            to_name: Recipient name
+            template_params: Template parameters (should include "params" key)
+            template_id: Brevo template ID (uses env var if not provided)
+        
+        Returns:
+            Dict with send result including message_id
+        """
+        try:
+            if not self._api_key_available:
+                return {
+                    "success": False,
+                    "error": "BREVO_API_KEY environment variable is required"
+                }
+            
+            # Use template ID from env or parameter
+            template_id = template_id or int(os.getenv("BREVO_TEMPLATE_ID", "0"))
+            if not template_id:
+                return {
+                    "success": False,
+                    "error": "BREVO_TEMPLATE_ID environment variable is required"
+                }
+            
+            # Prepare email payload
+            email_data = {
+                "templateId": template_id,
+                "to": [{"email": to_email, "name": to_name}],
+                "params": template_params,
+                "headers": {
+                    "X-Quest-Digest": "weekly",
+                    "X-Quest-User": to_email
+                },
+                "tags": ["quest-weekly-digest"]
+            }
+            
+            # Send via Brevo API
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"{self.base_url}/smtp/email",
+                    headers={
+                        "api-key": self.api_key,
+                        "accept": "application/json",
+                        "content-type": "application/json"
+                    },
+                    json=email_data
+                )
+                
+                response.raise_for_status()
+                result = response.json()
+                
+                message_id = result.get("messageId", "")
+                
+                # Structured logging for observability
+                logger.info("brevo_send_ok", extra={
+                    "message_id": message_id,
+                    "to": to_email,
+                    "template_id": template_id,
+                    "digest_type": "weekly"
+                })
+                
+                return {
+                    "success": True,
+                    "message_id": message_id,
+                    "to_email": to_email,
+                    "sent_at": datetime.utcnow().isoformat(),
+                    "template_id": template_id
+                }
+                
+        except Exception as e:
+            error_msg = f"Brevo digest send failed: {str(e)}"
+            logger.error(f"Brevo digest send failed for {to_email}: {error_msg}")
+            return {
+                "success": False,
+                "error": error_msg,
+                "to_email": to_email,
+                "sent_at": datetime.utcnow().isoformat()
             }
     
     async def send_test_email(
