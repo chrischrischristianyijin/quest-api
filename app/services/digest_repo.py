@@ -519,7 +519,7 @@ class DigestRepo:
             if meta:
                 event_data["meta"] = meta
             
-            response = self.supabase.table("email_events").insert(event_data).execute()
+            response = self.supabase_service.table("email_events").insert(event_data).execute()
             
             if hasattr(response, 'error') and response.error:
                 logger.error(f"Error logging email event: {response.error}")
@@ -565,7 +565,7 @@ class DigestRepo:
             if meta:
                 digest_data["meta"] = meta
             
-            response = self.supabase.table("email_digests").insert(digest_data).execute()
+            response = self.supabase_service.table("email_digests").insert(digest_data).execute()
             
             if hasattr(response, 'error') and response.error:
                 logger.error(f"Error logging digest sent: {response.error}")
