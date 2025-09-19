@@ -102,7 +102,8 @@ class DigestRepo:
         """
         try:
             # Get insights created/updated in the time window
-            insights_response = self.supabase.table("insights").select(
+            # *** FIX: Use SERVICE CLIENT to bypass RLS ***
+            insights_response = self.supabase_service.table("insights").select(
                 """
                 id,
                 title,
@@ -127,7 +128,8 @@ class DigestRepo:
                 insights = insights_response.data or []
             
             # Get stacks created/updated in the time window
-            stacks_response = self.supabase.table("stacks").select(
+            # *** FIX: Use SERVICE CLIENT to bypass RLS ***
+            stacks_response = self.supabase_service.table("stacks").select(
                 """
                 id,
                 name,
@@ -661,7 +663,8 @@ class DigestRepo:
             logger.info(f"📧 EMAIL DIGEST: Fetching insights for user {user_id} from {start_utc.isoformat()} to {now_utc.isoformat()}")
             
             # 2) Use the same SELECT signature as insights_service.py (WORKING PATTERN)
-            query = self.supabase.table("insights").select(
+            # *** FIX: Use SERVICE CLIENT to bypass RLS for server-side email digest reads ***
+            query = self.supabase_service.table("insights").select(
                 """
                 id,
                 title,
@@ -687,6 +690,13 @@ class DigestRepo:
             
             rows = resp.data or []
             logger.info(f"📧 EMAIL DIGEST: Retrieved {len(rows)} total insights for user {user_id}")
+            
+            # Sanity check for RLS/identity issues
+            if not rows:
+                logger.warning(
+                    f"📧 EMAIL DIGEST: No insights returned for user {user_id}. "
+                    f"Using service client to bypass RLS. Check if user has any insights in database."
+                )
             
             # 4) Filter in Python: include items created OR updated within window
             def _parse_dt(s: str) -> datetime:
