@@ -732,14 +732,14 @@ async def test_send_digest(
         logger.info(f"📧 BREVO SEND: Template params keys: {list(params.keys()) if isinstance(params, dict) else 'Not a dict'}")
         logger.info(f"📧 BREVO SEND: Template params: {params}")
         
-        # Try both formats - first with params wrapper (as template expects), then direct
+        # CORRECT: Wrap params under "params" key to match Brevo template structure
         template_params_wrapped = {"params": params}
-        logger.info(f"📧 BREVO SEND: Wrapped params: {template_params_wrapped}")
+        logger.info(f"📧 BREVO SEND: Wrapped params structure: {template_params_wrapped}")
         
         send_result = await email_sender_instance.send_brevo_digest(
             to_email=email_override or user_profile.get("email", "test@example.com"),
             to_name=user_profile.get("first_name", "User"),
-            template_params=template_params_wrapped,  # Wrap under "params" to match Brevo template
+            template_params=template_params_wrapped,  # Wrap under "params" to match template
         )
         
         return JSONResponse({"ok": True, **result, "send_result": send_result}, 200)

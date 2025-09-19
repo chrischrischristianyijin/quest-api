@@ -49,8 +49,19 @@ def should_send_weekly_digest(
     now_local = now_utc.astimezone(tz)
 
     # Match exact hour + weekday in user's TZ
-    weekday_match = now_local.weekday() == prefs.preferred_day
+    # IMPORTANT: Convert between JavaScript weekday (Sunday=0) and Python weekday (Monday=0)
+    # JavaScript: Sun=0, Mon=1, Tue=2, Wed=3, Thu=4, Fri=5, Sat=6
+    # Python:     Mon=0, Tue=1, Wed=2, Thu=3, Fri=4, Sat=5, Sun=6
+    python_weekday = now_local.weekday()  # Mon=0, ..., Sun=6
+    js_weekday = (python_weekday + 1) % 7  # Convert to JS convention: Sun=0, ..., Sat=6
+    
+    weekday_match = js_weekday == prefs.preferred_day
     hour_match = now_local.hour == prefs.preferred_hour
+    
+    # Debug logging for weekday conversion
+    from app.core.logger import logger
+    logger.info(f"📅 WEEKDAY CONVERSION: Python weekday={python_weekday}, JS weekday={js_weekday}, preferred_day={prefs.preferred_day}, match={weekday_match}")
+    logger.info(f"🕐 HOUR MATCH: current_hour={now_local.hour}, preferred_hour={prefs.preferred_hour}, match={hour_match}")
 
     if not (weekday_match and hour_match):
         return False
