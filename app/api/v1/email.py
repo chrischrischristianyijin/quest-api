@@ -714,6 +714,11 @@ async def test_send_digest(
         
         params = _build_params(user_profile, insights)
         result["params_sample"] = {k: (v if k != "tags" else v[:2]) for k, v in params.items()}
+        
+        # Debug logging for params
+        logger.info(f"📧 EMAIL PARAMS: Built params with {len(params.get('tags', []))} tags")
+        logger.info(f"📧 EMAIL PARAMS: AI summary: {params.get('ai_summary', 'None')[:100]}...")
+        logger.info(f"📧 EMAIL PARAMS: Tags sample: {params.get('tags', [])[:2]}")
 
         if dry_run:
             return JSONResponse({"ok": True, **result, "note": "Dry run only. No email sent."}, 200)
@@ -793,4 +798,74 @@ async def process_brevo_webhook(payload: Dict[str, Any]):
 
 # Add the router to your main FastAPI app
 # app.include_router(email_router, prefix="/api/v1")
+
+# Helper functions
+def _safe_str(value) -> str:
+    """Safely convert value to string."""
+    if value is None:
+        return ""
+    return str(value).strip()
+
+def _safe_list(value) -> list:
+    """Safely convert value to list."""
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    return [value]
+
+def _summarize_by_tag(insights: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+    """Safely summarize insights by tag with defensive programming."""
+    tags_map: Dict[str, List[str]] = {}
+    for it in _safe_list(insights):
+        title = _safe_str(it.get("title")) or "Untitled"
+        insight_tags = _safe_list(it.get("tags"))
+        
+        # Debug logging
+        logger.info(f"📧 TAG DEBUG: Processing insight '{title}' with tags: {insight_tags}")
+        
+        if not insight_tags:
+            # Handle insights without tags
+            tags_map.setdefault("Untagged", []).append(title)
+        else:
+            for t in insight_tags:
+                name = _safe_str(t.get("name")) if isinstance(t, dict) else _safe_str(t)
+                if not name:
+                    name = "Untagged"
+                tags_map.setdefault(name, []).append(title)
+                logger.info(f"📧 TAG DEBUG: Added '{title}' to tag '{name}'")
+    
+    result = [{"name": k, "articles": ", ".join(v[:6])} for k, v in tags_map.items()]
+    logger.info(f"📧 TAG DEBUG: Final tags summary: {result}")
+    return result
+
+def _build_params(user_profile: Dict[str, Any], insights: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Build email template parameters from user profile and insights."""
+    logger.info(f"📧 PARAMS BUILD: Processing {len(insights)} insights for user {user_profile.get('id', 'unknown')}")
+    
+    # Process insights by tags
+    tags = _summarize_by_tag(insights)
+    
+    # Generate AI summary
+    insight_count = len(insights)
+    if insight_count > 0:
+        ai_summary = f"You captured {insight_count} new insights this week. Great job expanding your second brain!"
+        if tags:
+            tag_names = [tag["name"] for tag in tags]
+            ai_summary += f" Your insights were organized into {len(tags)} categories: {', '.join(tag_names[:3])}{'...' if len(tag_names) > 3 else ''}."
+    else:
+        ai_summary = "No new insights this week. Consider adding some content to build your knowledge base!"
+    
+    # Build parameters
+    params = {
+        "tags": tags,
+        "ai_summary": ai_summary,
+        "recommended_tag": tags[0]["name"] if tags else "General",
+        "recommended_articles": tags[0]["articles"] if tags else "Check out our latest insights",
+        "login_url": "https://quest.example.com/my-space",
+        "unsubscribe_url": "https://quest.example.com/unsubscribe"
+    }
+    
+    logger.info(f"📧 PARAMS BUILD: Built params with {len(tags)} tags, AI summary length: {len(ai_summary)}")
+    return params
 
