@@ -346,7 +346,16 @@ async def digest_preview_post(payload: dict, user_id: str = Depends(get_current_
         repo = DigestRepo()
         user_profile = await repo.get_user_profile_data(user_id)
         if not user_profile:
-            raise HTTPException(status_code=404, detail="User profile not found")
+            # Graceful fallback: create minimal profile data instead of failing
+            logger.warning(f"📧 DIGEST PREVIEW: No profile found for user {user_id}, using fallback profile")
+            user_profile = {
+                "id": user_id,
+                "email": "user@example.com",  # Fallback email
+                "first_name": "User",
+                "nickname": "User",
+                "username": f"user_{user_id[:8]}",
+                "avatar_url": None
+            }
         
         # Get recent insights (tolerate empty insight sets)
         insights = await repo.get_recent_insights(user_id, days=7) or []
@@ -544,7 +553,16 @@ async def send_test_email(
         # Get user profile data from database
         user_profile = await repo.get_user_profile_data(user_id)
         if not user_profile:
-            raise HTTPException(status_code=404, detail="User profile not found")
+            # Graceful fallback: create minimal profile data instead of failing
+            logger.warning(f"🧪 TEST EMAIL: No profile found for user {user_id}, using fallback profile")
+            user_profile = {
+                "id": user_id,
+                "email": "user@example.com",  # Fallback email
+                "first_name": "User",
+                "nickname": "User",
+                "username": f"user_{user_id[:8]}",
+                "avatar_url": None
+            }
         
         # Combine user profile with preferences
         user_data = {

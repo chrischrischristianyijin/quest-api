@@ -590,11 +590,12 @@ class DigestRepo:
                 """
                 id,
                 nickname,
-                email,
                 username,
                 avatar_url,
+                bio,
                 created_at,
-                updated_at
+                updated_at,
+                memory_profile
                 """
             ).eq("id", user_id).execute()
             
@@ -609,12 +610,16 @@ class DigestRepo:
             
             profile = data[0]
             
-            # Also try to get email from auth.users if not in profiles
-            if not profile.get("email"):
-                # Try to get from auth.users via service role key
+            # Get email from auth.users since it's not in profiles table
+            try:
                 auth_response = self.supabase_service.table("auth.users").select("email").eq("id", user_id).execute()
                 if not hasattr(auth_response, 'error') and auth_response.data:
                     profile["email"] = auth_response.data[0].get("email")
+                else:
+                    profile["email"] = "user@example.com"  # Fallback
+            except Exception as e:
+                logger.warning(f"Could not fetch email from auth.users for {user_id}: {e}")
+                profile["email"] = "user@example.com"  # Fallback
             
             # Ensure we have the required fields for digest
             user_data = {
