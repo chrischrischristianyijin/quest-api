@@ -532,6 +532,52 @@ class DigestRepo:
             logger.error(f"Error logging email event: {e}")
             return False
     
+    async def log_digest_sent(
+        self,
+        user_id: str,
+        message_id: str,
+        email_type: str = "weekly_digest",
+        insights_count: int = 0,
+        meta: Optional[Dict[str, Any]] = None
+    ) -> bool:
+        """
+        Log that a digest was sent to a user.
+        
+        Args:
+            user_id: User ID
+            message_id: Brevo message ID
+            email_type: Type of digest (weekly_digest, test_digest, etc.)
+            insights_count: Number of insights included
+            meta: Additional metadata
+        
+        Returns:
+            True if successful
+        """
+        try:
+            digest_data = {
+                "user_id": user_id,
+                "message_id": message_id,
+                "email_type": email_type,
+                "insights_count": insights_count,
+                "sent_at": datetime.utcnow().isoformat()
+            }
+            
+            if meta:
+                digest_data["meta"] = meta
+            
+            response = self.supabase.table("email_digests").insert(digest_data).execute()
+            
+            if hasattr(response, 'error') and response.error:
+                logger.error(f"Error logging digest sent: {response.error}")
+                return False
+            
+            logger.info(f"Logged digest sent: {email_type} for user {user_id} with {insights_count} insights")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error logging digest sent: {e}")
+            return False
+    
     async def get_digest_stats(self, days: int = 7) -> Dict[str, Any]:
         """
         Get digest statistics for the last N days.

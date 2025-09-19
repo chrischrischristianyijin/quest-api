@@ -624,6 +624,38 @@ async def send_test_email(
         
         result = await job.send_digest_email(test_user_data, digest_payload)
         
+        # Log test email event to database
+        if result.get("success") and result.get("message_id"):
+            try:
+                # Log to email_events table
+                await repo.log_email_event(
+                    message_id=result["message_id"],
+                    event="sent",
+                    user_id=user_id,
+                    meta={
+                        "email_type": "test_digest",
+                        "to_email": request.email,
+                        "insights_count": len(digest_payload.get('insights', [])),
+                        "test_send": True
+                    }
+                )
+                
+                # Log to email_digests table
+                await repo.log_digest_sent(
+                    user_id=user_id,
+                    message_id=result["message_id"],
+                    email_type="test_digest",
+                    insights_count=len(digest_payload.get('insights', [])),
+                    meta={
+                        "to_email": request.email,
+                        "test_send": True
+                    }
+                )
+                
+                logger.info(f"📧 TEST EMAIL EVENT: Logged test email sent event and digest for message {result['message_id']}")
+            except Exception as e:
+                logger.error(f"📧 TEST EMAIL EVENT: Failed to log test email event: {e}")
+        
         return {
             "success": result["success"],
             "message": f"Test digest email sent to {request.email}" if result["success"] else "Failed to send test digest",
@@ -741,6 +773,40 @@ async def test_send_digest(
             to_name=user_profile.get("first_name", "User"),
             template_params=template_params_wrapped,  # Wrap under "params" to match template
         )
+        
+        # Log email event to database
+        if send_result.get("success") and send_result.get("message_id"):
+            try:
+                # Log to email_events table
+                await repo.log_email_event(
+                    message_id=send_result["message_id"],
+                    event="sent",
+                    user_id=user_id,
+                    meta={
+                        "email_type": "weekly_digest",
+                        "to_email": email_override or user_profile.get("email", "test@example.com"),
+                        "template_id": send_result.get("template_id"),
+                        "insights_count": len(insights),
+                        "test_send": bool(email_override)
+                    }
+                )
+                
+                # Log to email_digests table
+                await repo.log_digest_sent(
+                    user_id=user_id,
+                    message_id=send_result["message_id"],
+                    email_type="weekly_digest",
+                    insights_count=len(insights),
+                    meta={
+                        "to_email": email_override or user_profile.get("email", "test@example.com"),
+                        "template_id": send_result.get("template_id"),
+                        "test_send": bool(email_override)
+                    }
+                )
+                
+                logger.info(f"📧 EMAIL EVENT: Logged sent event and digest for message {send_result['message_id']}")
+            except Exception as e:
+                logger.error(f"📧 EMAIL EVENT: Failed to log sent event: {e}")
         
         return JSONResponse({"ok": True, **result, "send_result": send_result}, 200)
 
