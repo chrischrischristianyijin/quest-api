@@ -59,7 +59,8 @@ def should_send_weekly_digest(
     hour_match = now_local.hour == prefs.preferred_hour
     
     # Debug logging for weekday conversion
-    from app.core.logger import logger
+    import logging
+    logger = logging.getLogger(__name__)
     logger.info(f"📅 WEEKDAY CONVERSION: Python weekday={python_weekday}, JS weekday={js_weekday}, preferred_day={prefs.preferred_day}, match={weekday_match}")
     logger.info(f"🕐 HOUR MATCH: current_hour={now_local.hour}, preferred_hour={prefs.preferred_hour}, match={hour_match}")
 
