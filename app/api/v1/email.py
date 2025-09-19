@@ -640,19 +640,9 @@ async def send_test_email(
                     }
                 )
                 
-                # Log to email_digests table
-                await repo.log_digest_sent(
-                    user_id=user_id,
-                    message_id=result["message_id"],
-                    email_type="test_digest",
-                    insights_count=len(digest_payload.get('insights', [])),
-                    meta={
-                        "to_email": request.email,
-                        "test_send": True
-                    }
-                )
+                # Note: email_digests table is redundant - all info is in email_events
                 
-                logger.info(f"📧 TEST EMAIL EVENT: Logged test email sent event and digest for message {result['message_id']}")
+                logger.info(f"📧 TEST EMAIL EVENT: Logged test email sent event for message {result['message_id']}")
             except Exception as e:
                 logger.error(f"📧 TEST EMAIL EVENT: Failed to log test email event: {e}")
         
@@ -791,20 +781,9 @@ async def test_send_digest(
                     }
                 )
                 
-                # Log to email_digests table
-                await repo.log_digest_sent(
-                    user_id=user_id,
-                    message_id=send_result["message_id"],
-                    email_type="weekly_digest",
-                    insights_count=len(insights),
-                    meta={
-                        "to_email": email_override or user_profile.get("email", "test@example.com"),
-                        "template_id": send_result.get("template_id"),
-                        "test_send": bool(email_override)
-                    }
-                )
+                # Note: email_digests table is redundant - all info is in email_events
                 
-                logger.info(f"📧 EMAIL EVENT: Logged sent event and digest for message {send_result['message_id']}")
+                logger.info(f"📧 EMAIL EVENT: Logged sent event for message {send_result['message_id']}")
             except Exception as e:
                 logger.error(f"📧 EMAIL EVENT: Failed to log sent event: {e}")
         

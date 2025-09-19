@@ -532,55 +532,12 @@ class DigestRepo:
             logger.error(f"Error logging email event: {e}")
             return False
     
-    async def log_digest_sent(
-        self,
-        user_id: str,
-        message_id: str,
-        email_type: str = "weekly_digest",
-        insights_count: int = 0,
-        meta: Optional[Dict[str, Any]] = None
-    ) -> bool:
-        """
-        Log that a digest was sent to a user.
-        
-        Args:
-            user_id: User ID
-            message_id: Brevo message ID
-            email_type: Type of digest (weekly_digest, test_digest, etc.)
-            insights_count: Number of insights included
-            meta: Additional metadata
-        
-        Returns:
-            True if successful
-        """
-        try:
-            digest_data = {
-                "user_id": user_id,
-                "message_id": message_id,
-                "email_type": email_type,
-                "insights_count": insights_count,
-                "sent_at": datetime.utcnow().isoformat()
-            }
-            
-            if meta:
-                digest_data["meta"] = meta
-            
-            response = self.supabase_service.table("email_digests").insert(digest_data).execute()
-            
-            if hasattr(response, 'error') and response.error:
-                logger.error(f"Error logging digest sent: {response.error}")
-                return False
-            
-            logger.info(f"Logged digest sent: {email_type} for user {user_id} with {insights_count} insights")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error logging digest sent: {e}")
-            return False
+    # Note: log_digest_sent function removed - email_digests table is redundant
+    # All digest information is now tracked in email_events table with proper event types
     
     async def get_digest_stats(self, days: int = 7) -> Dict[str, Any]:
         """
-        Get digest statistics for the last N days.
+        Get digest statistics for the last N days using email_events table.
         
         Args:
             days: Number of days to look back
@@ -589,37 +546,46 @@ class DigestRepo:
             Statistics dictionary
         """
         try:
-            cutoff_date = (datetime.utcnow() - timedelta(days=days)).date()
+            from datetime import timedelta
+            cutoff_date = (datetime.utcnow() - timedelta(days=days)).isoformat()
             
-            # Get digest counts by status
-            response = self.supabase.table("email_digests").select("status").gte("created_at", cutoff_date.isoformat()).execute()
+            # Get email events for the period
+            response = self.supabase_service.table("email_events").select("*").gte("occurred_at", cutoff_date).execute()
             
             if hasattr(response, 'error') and response.error:
-                logger.error(f"Error fetching digest stats: {response.error}")
+                logger.error(f"Error fetching email events stats: {response.error}")
                 return {}
             
-            digests = response.data or []
-            status_counts = {}
-            for digest in digests:
-                status = digest["status"]
-                status_counts[status] = status_counts.get(status, 0) + 1
+            events = response.data or []
+            
+            # Count events by type
+            event_counts = {}
+            sent_emails = set()  # Track unique message_ids for sent emails
+            
+            for event in events:
+                event_type = event.get("event", "unknown")
+                event_counts[event_type] = event_counts.get(event_type, 0) + 1
+                
+                if event_type == "sent":
+                    sent_emails.add(event.get("message_id"))
             
             # Get total users with preferences
-            prefs_response = self.supabase.table("email_preferences").select("user_id").eq("weekly_digest_enabled", True).execute()
+            prefs_response = self.supabase_service.table("email_preferences").select("user_id").eq("weekly_digest_enabled", True).execute()
             total_users = len(prefs_response.data or []) if not hasattr(prefs_response, 'error') else 0
             
             return {
                 "total_users": total_users,
-                "digests_sent": status_counts.get("sent", 0),
-                "digests_failed": status_counts.get("failed", 0),
-                "digests_queued": status_counts.get("queued", 0),
-                "digests_rendered": status_counts.get("rendered", 0),
-                "total_digests": len(digests),
+                "emails_sent": len(sent_emails),
+                "emails_delivered": event_counts.get("delivered", 0),
+                "emails_opened": event_counts.get("opened", 0),
+                "emails_bounced": event_counts.get("bounced", 0),
+                "emails_spam": event_counts.get("spam", 0),
+                "total_events": len(events),
                 "period_days": days
             }
             
         except Exception as e:
-            logger.error(f"Error fetching digest stats: {e}")
+            logger.error(f"Error fetching email events stats: {e}")
             return {}
 
     async def get_user_profile_data(self, user_id: str) -> Optional[Dict[str, Any]]:
