@@ -607,32 +607,22 @@ class InsightsService:
             logger.info(f"🔍 DEBUG: 创建的insight stack_id: {insight.get('stack_id')} (type: {type(insight.get('stack_id'))})")
             insight_id = UUID(insight['id'])
 
-            # 始终启动异步后台任务处理内容抓取和摘要生成（优化速度）
-            try:
-                import asyncio
-                # 创建后台任务，不等待完成 - 优化：立即返回给用户，后台处理
-                asyncio.create_task(InsightsService._fetch_and_save_content_optimized(
-                    insight_id=insight_id,
-                    user_id=user_id,
-                    url=insight_data.url,
-                    thought=insight_data.thought  # 传递thought字段到后台任务
-                ))
-                logger.info("已启动优化的异步内容处理 pipeline 后台任务")
-            except Exception as task_err:
-                logger.warning(f"启动异步内容处理任务失败: {task_err}")
-                # 如果异步任务失败，尝试同步生成基础摘要
+            # 启动异步后台任务处理内容抓取和摘要生成
+            if os.getenv('FETCH_PAGE_CONTENT_ENABLED', '').lower() in ('1', 'true', 'yes'):
                 try:
-                    asyncio.create_task(InsightsService._generate_basic_summary(
+                    import asyncio
+                    # 创建后台任务，不等待完成
+                    asyncio.create_task(InsightsService._fetch_and_save_content(
                         insight_id=insight_id,
                         user_id=user_id,
                         url=insight_data.url,
-                        title=insight_data.title,
-                        description=insight_data.description,
-                        thought=insight_data.thought
+                        thought=insight_data.thought  # 传递thought字段到后台任务
                     ))
-                    logger.info("启动基础摘要生成作为后备方案")
-                except Exception as fallback_err:
-                    logger.warning(f"基础摘要生成也失败: {fallback_err}")
+                    logger.info("已启动异步内容处理 pipeline 后台任务")
+                except Exception as task_err:
+                    logger.warning(f"启动异步内容处理任务失败: {task_err}")
+            else:
+                logger.info("FETCH_PAGE_CONTENT_ENABLED 未开启，跳过全文抓取与保存")
             
             # 处理标签
             if insight_data.tag_ids:
@@ -710,228 +700,6 @@ class InsightsService:
         except Exception as e:
             logger.error(f"创建insight失败: {str(e)}")
             return {"success": False, "message": f"创建insight失败: {str(e)}"}
-
-    @staticmethod
-    async def _fetch_and_save_content_optimized(insight_id: UUID, user_id: UUID, url: str, thought: Optional[str] = None) -> None:
-        """优化的 insight 内容处理 pipeline（异步后台任务）。
-        
-        优化策略：
-        1. 并行处理：同时抓取内容和准备数据库操作
-        2. 快速失败：如果页面抓取失败，立即生成基础摘要
-        3. 缓存优先：检查是否已有摘要缓存
-        4. 分阶段保存：先保存基础信息，再更新摘要
-        """
-        try:
-            logger.info(f"[优化后台任务] 开始处理 insight 内容: insight_id={insight_id}, url={url}")
-            
-            # 1. 快速检查缓存
-            from app.routers.metadata import summary_cache
-            if url in summary_cache:
-                cached = summary_cache[url]
-                if cached.get('status') == 'completed' and cached.get('summary'):
-                    logger.info(f"[优化后台任务] 发现缓存摘要，直接使用: {url}")
-                    await InsightsService._save_cached_summary(insight_id, user_id, url, cached['summary'], thought)
-                    return
-            
-            # 2. 并行处理：设置超时以避免长时间等待
-            import asyncio
-            try:
-                # 设置5秒超时，避免用户等待太久
-                page = await asyncio.wait_for(fetch_page_content(url), timeout=5.0)
-                logger.info(f"[优化后台任务] 快速抓取完成: status={page.get('status_code')}")
-            except asyncio.TimeoutError:
-                logger.warning(f"[优化后台任务] 页面抓取超时，使用基础摘要: {url}")
-                await InsightsService._generate_basic_summary(insight_id, user_id, url, None, None, thought)
-                return
-            except Exception as fetch_err:
-                logger.warning(f"[优化后台任务] 页面抓取失败，使用基础摘要: {fetch_err}")
-                await InsightsService._generate_basic_summary(insight_id, user_id, url, None, None, thought)
-                return
-            
-            # 3. 快速处理文本
-            raw_text = page.get('text') or ''
-            if not raw_text:
-                # 如果没有抓取到内容，尝试从数据库获取description
-                try:
-                    desc_res = (
-                        get_supabase_service()
-                        .table('insights')
-                        .select('title, description')
-                        .eq('id', str(insight_id))
-                        .single()
-                        .execute()
-                    )
-                    if getattr(desc_res, 'data', None):
-                        raw_text = f"{desc_res.data.get('title', '')}\n{desc_res.data.get('description', '')}".strip()
-                except Exception:
-                    pass
-            
-            # 4. 快速生成摘要（并行处理）
-            summary_text = None
-            if raw_text:
-                try:
-                    # 限制文本长度以提高速度
-                    text_for_summary = raw_text[:4000] if len(raw_text) > 4000 else raw_text
-                    summary_text = await generate_summary(text_for_summary)
-                    
-                    if summary_text:
-                        logger.info(f"[优化后台任务] 快速生成摘要完成: {url}，长度={len(summary_text)}")
-                        # 立即更新缓存
-                        summary_cache[url] = {
-                            'status': 'completed',
-                            'created_at': datetime.now(),
-                            'summary': summary_text,
-                            'error': None
-                        }
-                except Exception as sum_err:
-                    logger.warning(f"[优化后台任务] 摘要生成失败: {sum_err}")
-                    # 生成基础摘要作为后备
-                    summary_text = f"Content from {url}"
-                    if raw_text:
-                        # 使用前200个字符作为基础摘要
-                        summary_text = raw_text[:200] + "..." if len(raw_text) > 200 else raw_text
-            
-            # 5. 快速保存到数据库
-            await InsightsService._save_content_fast(insight_id, user_id, url, page, summary_text, thought)
-            
-        except Exception as content_err:
-            logger.error(f"[优化后台任务] 内容处理失败: {content_err}")
-            # 最后的后备方案：生成基础摘要
-            await InsightsService._generate_basic_summary(insight_id, user_id, url, None, None, thought)
-        finally:
-            logger.info(f"[优化后台任务] 内容处理任务结束: insight_id={insight_id}")
-
-    @staticmethod
-    async def _generate_basic_summary(insight_id: UUID, user_id: UUID, url: str, title: Optional[str], description: Optional[str], thought: Optional[str]) -> None:
-        """生成基础摘要作为后备方案"""
-        try:
-            logger.info(f"[基础摘要] 为 insight {insight_id} 生成基础摘要")
-            
-            # 如果没有提供title和description，从数据库获取
-            if not title or not description:
-                try:
-                    insight_res = (
-                        get_supabase_service()
-                        .table('insights')
-                        .select('title, description')
-                        .eq('id', str(insight_id))
-                        .single()
-                        .execute()
-                    )
-                    if getattr(insight_res, 'data', None):
-                        title = insight_res.data.get('title', '')
-                        description = insight_res.data.get('description', '')
-                except Exception:
-                    pass
-            
-            # 生成基础摘要
-            basic_summary = f"Content from {url}"
-            if title:
-                basic_summary = f"{title}"
-            if description:
-                basic_summary += f" - {description[:100]}..." if len(description) > 100 else f" - {description}"
-            
-            # 保存基础内容
-            content_payload = {
-                'insight_id': str(insight_id),
-                'user_id': str(user_id),
-                'url': url,
-                'summary': basic_summary,
-                'thought': thought,
-                'extracted_at': datetime.now().isoformat()
-            }
-            
-            supabase_service = get_supabase_service()
-            content_res = (
-                supabase_service
-                .table('insight_contents')
-                .insert(content_payload)
-                .execute()
-            )
-            
-            if hasattr(content_res, 'error') and content_res.error:
-                logger.warning(f"[基础摘要] 保存失败: {content_res.error}")
-            else:
-                logger.info(f"[基础摘要] 保存成功: {url}")
-                
-        except Exception as e:
-            logger.error(f"[基础摘要] 生成失败: {e}")
-
-    @staticmethod
-    async def _save_cached_summary(insight_id: UUID, user_id: UUID, url: str, summary: str, thought: Optional[str]) -> None:
-        """保存缓存的摘要"""
-        try:
-            content_payload = {
-                'insight_id': str(insight_id),
-                'user_id': str(user_id),
-                'url': url,
-                'summary': summary,
-                'thought': thought,
-                'extracted_at': datetime.now().isoformat()
-            }
-            
-            supabase_service = get_supabase_service()
-            content_res = (
-                supabase_service
-                .table('insight_contents')
-                .insert(content_payload)
-                .execute()
-            )
-            
-            if hasattr(content_res, 'error') and content_res.error:
-                logger.warning(f"[缓存摘要] 保存失败: {content_res.error}")
-            else:
-                logger.info(f"[缓存摘要] 保存成功: {url}")
-                
-        except Exception as e:
-            logger.error(f"[缓存摘要] 保存失败: {e}")
-
-    @staticmethod
-    async def _save_content_fast(insight_id: UUID, user_id: UUID, url: str, page: dict, summary: str, thought: Optional[str]) -> None:
-        """快速保存内容到数据库"""
-        try:
-            # 准备内容数据（只保存必要字段以提高速度）
-            extracted_at_val = page.get('extracted_at')
-            if isinstance(extracted_at_val, (datetime, date)):
-                extracted_at_val = extracted_at_val.isoformat()
-            
-            content_payload = {
-                'insight_id': str(insight_id),
-                'user_id': str(user_id),
-                'url': url,
-                'text': page.get('text'),  # 保留完整文本供后续使用
-                'content_type': page.get('content_type'),
-                'extracted_at': extracted_at_val,
-                'summary': summary,
-                'thought': thought
-            }
-            
-            # 数据清理
-            def _sanitize_for_pg(obj):
-                if obj is None:
-                    return None
-                if isinstance(obj, str):
-                    return obj.replace('\x00', ' ').replace('\u0000', ' ')
-                return obj
-            
-            safe_payload = {k: _sanitize_for_pg(v) for k, v in content_payload.items()}
-            
-            # 保存到数据库
-            supabase_service = get_supabase_service()
-            content_res = (
-                supabase_service
-                .table('insight_contents')
-                .insert(safe_payload)
-                .execute()
-            )
-            
-            if hasattr(content_res, 'error') and content_res.error:
-                logger.warning(f"[快速保存] 保存失败: {content_res.error}")
-            else:
-                logger.info(f"[快速保存] 保存成功: {url}")
-                
-        except Exception as e:
-            logger.error(f"[快速保存] 保存失败: {e}")
 
     @staticmethod
     async def _fetch_and_save_content(insight_id: UUID, user_id: UUID, url: str, thought: Optional[str] = None) -> None:
