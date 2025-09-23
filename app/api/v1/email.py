@@ -125,7 +125,7 @@ def _build_params(user: dict, insights: list) -> dict:
     
     # Keep AI summary/recommendation defensive if repo returns None
     try:
-        ai_summary = _safe_str(repo.get_ai_summary(insights))
+        ai_summary = _safe_str(repo.get_ai_summary(insights, user.get("id")))
     except Exception:
         ai_summary = ""
     

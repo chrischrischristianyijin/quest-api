@@ -785,12 +785,13 @@ class DigestRepo:
             logger.error(f"Error summarizing insights by tag: {e}")
             return []
 
-    def get_ai_summary(self, insights: List[Dict[str, Any]]) -> str:
+    def get_ai_summary(self, insights: List[Dict[str, Any]], user_id: str = None) -> str:
         """
-        Generate AI summary of insights.
+        Generate AI summary of insights using ChatGPT API.
         
         Args:
             insights: List of insight objects
+            user_id: User ID for personalized summary (optional)
         
         Returns:
             AI summary string (empty if no insights or generation fails)
@@ -799,8 +800,28 @@ class DigestRepo:
             if not insights:
                 return ""
             
-            # For now, return a simple summary
-            # TODO: Implement actual AI summarization
+            # Import here to avoid circular imports
+            from app.services.ai_summary_service import get_ai_summary_service
+            
+            # Use the new AI summary service if user_id is provided
+            if user_id:
+                try:
+                    ai_service = get_ai_summary_service()
+                    # Use asyncio to run the async method
+                    import asyncio
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        # If we're already in an async context, create a task
+                        import concurrent.futures
+                        with concurrent.futures.ThreadPoolExecutor() as executor:
+                            future = executor.submit(asyncio.run, ai_service.generate_weekly_insights_summary(user_id))
+                            return future.result()
+                    else:
+                        return loop.run_until_complete(ai_service.generate_weekly_insights_summary(user_id))
+                except Exception as e:
+                    logger.warning(f"AI summary service failed, using fallback: {e}")
+            
+            # Fallback to simple summary if AI service fails or user_id not provided
             insight_count = len(insights)
             if insight_count == 1:
                 return f"You captured 1 new insight this week. Keep building your knowledge base!"
