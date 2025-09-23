@@ -5,7 +5,6 @@ Generates intelligent summaries of user insights using ChatGPT API
 
 import os
 import logging
-import httpx
 import json
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
@@ -21,6 +20,35 @@ class AISummaryService:
         self.openai_api_key = os.getenv('OPENAI_API_KEY')
         self.openai_base_url = os.getenv('OPENAI_BASE_URL', 'https://api.openai.com/v1')
         self.chat_model = os.getenv('CHAT_MODEL', 'gpt-4o-mini')
+        self.client = None
+        self._initialize_client()
+    
+    def _initialize_client(self):
+        """Initialize OpenAI client following the embedding service pattern"""
+        try:
+            import openai
+        except ImportError:
+            logger.warning("OpenAI library not available, AI summary will be disabled")
+            return
+        
+        if not self.openai_api_key:
+            logger.warning("OpenAI API Key not configured, AI summary will be disabled")
+            return
+        
+        try:
+            self.client = openai.AsyncOpenAI(
+                api_key=self.openai_api_key,
+                base_url=self.openai_base_url,
+                timeout=30.0
+            )
+            logger.info(f"OpenAI AI Summary client initialized successfully, model: {self.chat_model}")
+        except Exception as e:
+            logger.error(f"OpenAI client initialization failed: {e}")
+            self.client = None
+    
+    def is_available(self) -> bool:
+        """Check if AI summary service is available"""
+        return self.client is not None and self.openai_api_key is not None
         
     async def generate_weekly_insights_summary(self, user_id: str) -> str:
         """
@@ -33,8 +61,8 @@ class AISummaryService:
             AI-generated summary with up to 5 key bullet points
         """
         try:
-            if not self.openai_api_key:
-                logger.warning("OpenAI API Key not configured, returning fallback summary")
+            if not self.is_available():
+                logger.warning("AI summary service not available, returning fallback summary")
                 return self._get_fallback_summary(user_id)
             
             # Get insights from the past week
@@ -250,7 +278,7 @@ If you find fewer than 5 distinct patterns, provide the most significant ones yo
     
     async def _call_chatgpt_api(self, prompt: str) -> Optional[str]:
         """
-        Call ChatGPT API to generate summary
+        Call ChatGPT API to generate summary using OpenAI client (following embedding service pattern)
         
         Args:
             prompt: The prompt to send to ChatGPT
@@ -259,64 +287,43 @@ If you find fewer than 5 distinct patterns, provide the most significant ones yo
             Generated summary or None if failed
         """
         try:
-            headers = {
-                'Authorization': f'Bearer {self.openai_api_key}',
-                'Content-Type': 'application/json',
-            }
+            if not self.client:
+                logger.error("OpenAI client not initialized")
+                return None
             
-            # Add organization and project headers if configured
-            if os.getenv('OPENAI_ORGANIZATION'):
-                headers['OpenAI-Organization'] = os.getenv('OPENAI_ORGANIZATION')
-            if os.getenv('OPENAI_PROJECT'):
-                headers['OpenAI-Project'] = os.getenv('OPENAI_PROJECT')
+            # Prepare messages
+            messages = [{"role": "user", "content": prompt}]
             
-            # Prepare payload based on model type
+            # Prepare parameters based on model type
             if 'gpt-5' in self.chat_model.lower():
                 # GPT-5 mini special parameters
-                payload = {
-                    'model': self.chat_model,
-                    'messages': [
-                        {"role": "user", "content": prompt}
-                    ],
-                    'temperature': 0.3,
-                    'max_completion_tokens': 800,  # GPT-5 mini uses max_completion_tokens
-                    'verbosity': 'low',  # Concise responses
-                    'reasoning_effort': 'minimal'  # Fast reasoning
-                }
+                response = await self.client.chat.completions.create(
+                    model=self.chat_model,
+                    messages=messages,
+                    temperature=0.3,
+                    max_completion_tokens=800,  # GPT-5 mini uses max_completion_tokens
+                    verbosity='low',  # Concise responses
+                    reasoning_effort='minimal'  # Fast reasoning
+                )
             else:
                 # Standard GPT model parameters
-                payload = {
-                    'model': self.chat_model,
-                    'messages': [
-                        {"role": "user", "content": prompt}
-                    ],
-                    'temperature': 0.3,
-                    'max_tokens': 800
-                }
-            
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(
-                    f"{self.openai_base_url}/chat/completions",
-                    json=payload,
-                    headers=headers
+                response = await self.client.chat.completions.create(
+                    model=self.chat_model,
+                    messages=messages,
+                    temperature=0.3,
+                    max_tokens=800
                 )
-                response.raise_for_status()
-                
-                data = response.json()
-                choices = data.get('choices', [])
-                
-                if choices and len(choices) > 0:
-                    content = choices[0].get('message', {}).get('content', '').strip()
-                    if content:
-                        logger.info("ChatGPT API call successful")
-                        return content
-                
-                logger.warning("ChatGPT API returned empty response")
-                return None
-                
-        except httpx.HTTPStatusError as e:
-            logger.error(f"ChatGPT API HTTP error: {e.response.status_code} - {e.response.text}")
+            
+            # Extract content from response
+            if response.choices and len(response.choices) > 0:
+                content = response.choices[0].message.content
+                if content and content.strip():
+                    logger.info("ChatGPT API call successful")
+                    return content.strip()
+            
+            logger.warning("ChatGPT API returned empty response")
             return None
+                
         except Exception as e:
             logger.error(f"ChatGPT API call failed: {e}")
             return None
