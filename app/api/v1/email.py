@@ -902,24 +902,42 @@ def _build_params(user_profile: Dict[str, Any], insights: List[Dict[str, Any]]) 
     # Process insights by tags
     tags = _summarize_by_tag(insights)
     
-    # Generate AI summary
-    insight_count = len(insights)
-    if insight_count > 0:
-        ai_summary = f"You captured {insight_count} new insights this week. Great job expanding your second brain!"
-        if tags:
-            tag_names = [tag["name"] for tag in tags]
-            ai_summary += f" Your insights were organized into {len(tags)} categories: {', '.join(tag_names[:3])}{'...' if len(tag_names) > 3 else ''}."
-    else:
-        ai_summary = "No new insights this week. Consider adding some content to build your knowledge base!"
+    # Use AI summary service (same as the first _build_params function)
+    from ...services.digest_repo import DigestRepo
+    repo = DigestRepo()
+    
+    # Keep AI summary/recommendation defensive if repo returns None
+    try:
+        ai_summary = _safe_str(repo.get_ai_summary(insights, user_profile.get("id")))
+        logger.info(f"📧 PARAMS BUILD: AI summary generated successfully, length: {len(ai_summary)}")
+    except Exception as e:
+        logger.warning(f"📧 PARAMS BUILD: AI summary failed, using fallback: {e}")
+        # Fallback to simple summary
+        insight_count = len(insights)
+        if insight_count > 0:
+            ai_summary = f"You captured {insight_count} new insights this week. Great job expanding your second brain!"
+            if tags:
+                tag_names = [tag["name"] for tag in tags]
+                ai_summary += f" Your insights were organized into {len(tags)} categories: {', '.join(tag_names[:3])}{'...' if len(tag_names) > 3 else ''}."
+        else:
+            ai_summary = "No new insights this week. Consider adding some content to build your knowledge base!"
+    
+    try:
+        rec = repo.get_recommended_content(user_profile.get("id"))
+        if not isinstance(rec, tuple) or len(rec) != 2:
+            rec = ("", "")
+    except Exception:
+        rec = ("", "")
+    rec_tag, rec_articles = rec
     
     # Build parameters
     params = {
         "tags": tags,
         "ai_summary": ai_summary,
-        "recommended_tag": tags[0]["name"] if tags else "General",
-        "recommended_articles": tags[0]["articles"] if tags else "Check out our latest insights",
-        "login_url": "https://quest.example.com/my-space",
-        "unsubscribe_url": "https://quest.example.com/unsubscribe"
+        "recommended_tag": _safe_str(rec_tag) if rec_tag else (tags[0]["name"] if tags else "General"),
+        "recommended_articles": _safe_str(rec_articles) if rec_articles else (tags[0]["articles"] if tags else "Check out our latest insights"),
+        "login_url": f"{settings.APP_BASE_URL}/my-space",
+        "unsubscribe_url": f"{settings.UNSUBSCRIBE_BASE_URL}?u={_safe_str(user_profile.get('id'))}"
     }
     
     logger.info(f"📧 PARAMS BUILD: Built params with {len(tags)} tags, AI summary length: {len(ai_summary)}")
