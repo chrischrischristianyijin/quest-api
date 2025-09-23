@@ -49,6 +49,23 @@ class AISummaryService:
     def is_available(self) -> bool:
         """Check if AI summary service is available"""
         return self.client is not None and self.openai_api_key is not None
+    
+    async def _health_check(self) -> tuple[bool, str]:
+        """Test if the OpenAI client can actually make API calls"""
+        if not self.is_available():
+            return False, "Client not available / missing key"
+        try:
+            # Very cheap request
+            response = await self.client.chat.completions.create(
+                model=self.chat_model,
+                messages=[{"role": "user", "content": "Return the word OK"}],
+                max_tokens=5,
+                temperature=0
+            )
+            content = response.choices[0].message.content if response.choices else "No content"
+            return True, f"OK - Response: {content}"
+        except Exception as e:
+            return False, f"{type(e).__name__}: {e}"
         
     async def generate_weekly_insights_summary(self, user_id: str) -> str:
         """
@@ -175,17 +192,25 @@ class AISummaryService:
             # Prepare insights data for AI analysis
             insights_text = self._format_insights_for_ai(insights)
             
+            logger.info(f"AI SUMMARY DEBUG: Formatted insights text length: {len(insights_text)}")
+            logger.info(f"AI SUMMARY DEBUG: First 200 chars of insights: {insights_text[:200]}...")
+            
             if not insights_text.strip():
                 return "No meaningful content found in this week's insights."
             
             # Create AI prompt for correlation analysis
             prompt = self._create_summary_prompt(insights_text, len(insights))
             
+            logger.info(f"AI SUMMARY DEBUG: Prompt length: {len(prompt)}")
+            logger.info(f"AI SUMMARY DEBUG: Model: {self.chat_model}, Base URL: {self.openai_base_url}")
+            
             # Call ChatGPT API
             summary = await self._call_chatgpt_api(prompt)
             
             if summary:
                 logger.info("AI summary generated successfully")
+                logger.info(f"AI SUMMARY DEBUG: Generated summary length: {len(summary)}")
+                logger.info(f"AI SUMMARY DEBUG: Generated summary preview: {summary[:200]}...")
                 return summary
             else:
                 logger.warning("AI summary generation failed, using fallback")
@@ -193,6 +218,8 @@ class AISummaryService:
                 
         except Exception as e:
             logger.error(f"Error generating AI summary: {e}")
+            import traceback
+            logger.error(f"AI summary generation traceback: {traceback.format_exc()}")
             return self._get_fallback_summary_from_insights(insights)
     
     def _format_insights_for_ai(self, insights: List[Dict[str, Any]]) -> str:

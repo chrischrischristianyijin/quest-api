@@ -808,6 +808,12 @@ class DigestRepo:
                 try:
                     ai_service = get_ai_summary_service()
                     
+                    # ADD DEBUG LOGGING
+                    logger.info(f"AI DEBUG: key={'set' if ai_service.openai_api_key else 'missing'}, "
+                               f"client={'init' if ai_service.client else 'none'}, "
+                               f"model={ai_service.chat_model}, base={ai_service.openai_base_url}")
+                    logger.info(f"AI DEBUG: insights_len={len(insights)} user_id={user_id}")
+                    
                     # Check if OpenAI API key is configured
                     if not ai_service.openai_api_key:
                         logger.warning("OpenAI API Key not configured, using fallback summary")
@@ -821,10 +827,16 @@ class DigestRepo:
                         # If we're in an async context, create a task
                         task = loop.create_task(ai_service.generate_weekly_insights_summary(user_id))
                         # Wait for the task to complete
-                        return await task
+                        result = await task
+                        logger.info(f"AI DEBUG: ChatGPT result length: {len(result) if result else 0}")
+                        logger.info(f"AI DEBUG: ChatGPT result preview: {result[:200] if result else 'None'}...")
+                        return result
                     except RuntimeError:
                         # No event loop running, create a new one
-                        return asyncio.run(ai_service.generate_weekly_insights_summary(user_id))
+                        result = asyncio.run(ai_service.generate_weekly_insights_summary(user_id))
+                        logger.info(f"AI DEBUG: ChatGPT result length (new loop): {len(result) if result else 0}")
+                        logger.info(f"AI DEBUG: ChatGPT result preview (new loop): {result[:200] if result else 'None'}...")
+                        return result
                         
                 except Exception as e:
                     logger.warning(f"AI summary service failed, using fallback: {e}")

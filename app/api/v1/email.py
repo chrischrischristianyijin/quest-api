@@ -943,3 +943,34 @@ async def _build_params(user_profile: Dict[str, Any], insights: List[Dict[str, A
     logger.info(f"📧 PARAMS BUILD: Built params with {len(tags)} tags, AI summary length: {len(ai_summary)}")
     return params
 
+
+@router.get("/debug/ai-summary")
+async def debug_ai_summary(user_id: str = Depends(get_current_user_id)):
+    """Debug AI summary generation"""
+    try:
+        from app.services.ai_summary_service import get_ai_summary_service
+        
+        service = get_ai_summary_service()
+        
+        # Test health check
+        is_healthy, health_msg = await service._health_check()
+        
+        # Test insights fetch
+        insights = await service._get_weekly_insights(user_id)
+        
+        # Test full generation
+        summary = await service.generate_weekly_insights_summary(user_id)
+        
+        return {
+            "health_check": {"ok": is_healthy, "message": health_msg},
+            "insights_count": len(insights),
+            "summary": summary,
+            "client_available": service.is_available(),
+            "model": service.chat_model,
+            "base_url": service.openai_base_url,
+            "api_key_set": bool(service.openai_api_key)
+        }
+    except Exception as e:
+        import traceback
+        return {"error": str(e), "traceback": traceback.format_exc()}
+
