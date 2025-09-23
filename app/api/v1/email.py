@@ -597,7 +597,7 @@ async def send_test_email(
         
         # Get user activity data for the digest
         from datetime import datetime, timezone, timedelta
-        from app.utils.time_utils import get_week_boundaries
+        from app.services.digest_time import get_week_boundaries
         now_utc = datetime.now(timezone.utc)
         week_boundaries = get_week_boundaries(now_utc, user_prefs["timezone"])
         week_start = week_boundaries["prev_week_start"].date()
