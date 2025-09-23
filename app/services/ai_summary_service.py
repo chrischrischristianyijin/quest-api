@@ -259,7 +259,18 @@ class AISummaryService:
             if url:
                 insight_text += f" ({url})"
             if tags:
-                insight_text += f" [Tags: {', '.join(tags) if isinstance(tags, list) else tags}]"
+                # Handle tags as list of dictionaries with 'name' field
+                if isinstance(tags, list) and len(tags) > 0:
+                    if isinstance(tags[0], dict):
+                        # Tags are dictionaries with 'name' field
+                        tag_names = [tag.get('name', '') for tag in tags if isinstance(tag, dict) and tag.get('name')]
+                        insight_text += f" [Tags: {', '.join(tag_names)}]"
+                    else:
+                        # Tags are strings
+                        insight_text += f" [Tags: {', '.join(tags)}]"
+                else:
+                    # Single tag or other format
+                    insight_text += f" [Tags: {tags}]"
             insight_text += f"\n{content.strip()}\n"
             
             formatted_insights.append(insight_text)
