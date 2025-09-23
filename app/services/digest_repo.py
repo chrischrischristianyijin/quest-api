@@ -785,7 +785,7 @@ class DigestRepo:
             logger.error(f"Error summarizing insights by tag: {e}")
             return []
 
-    def get_ai_summary(self, insights: List[Dict[str, Any]], user_id: str = None) -> str:
+    async def get_ai_summary(self, insights: List[Dict[str, Any]], user_id: str = None) -> str:
         """
         Generate AI summary of insights using ChatGPT API.
         
@@ -807,19 +807,29 @@ class DigestRepo:
             if user_id:
                 try:
                     ai_service = get_ai_summary_service()
+                    
+                    # Check if OpenAI API key is configured
+                    if not ai_service.openai_api_key:
+                        logger.warning("OpenAI API Key not configured, using fallback summary")
+                        return self._get_simple_fallback_summary(insights)
+                    
                     # Use asyncio to run the async method
                     import asyncio
-                    loop = asyncio.get_event_loop()
-                    if loop.is_running():
-                        # If we're already in an async context, create a task
-                        import concurrent.futures
-                        with concurrent.futures.ThreadPoolExecutor() as executor:
-                            future = executor.submit(asyncio.run, ai_service.generate_weekly_insights_summary(user_id))
-                            return future.result()
-                    else:
-                        return loop.run_until_complete(ai_service.generate_weekly_insights_summary(user_id))
+                    try:
+                        # Try to get the current event loop
+                        loop = asyncio.get_running_loop()
+                        # If we're in an async context, create a task
+                        task = loop.create_task(ai_service.generate_weekly_insights_summary(user_id))
+                        # Wait for the task to complete
+                        return await task
+                    except RuntimeError:
+                        # No event loop running, create a new one
+                        return asyncio.run(ai_service.generate_weekly_insights_summary(user_id))
+                        
                 except Exception as e:
                     logger.warning(f"AI summary service failed, using fallback: {e}")
+                    import traceback
+                    logger.warning(f"AI summary error traceback: {traceback.format_exc()}")
             
             # Fallback to simple summary if AI service fails or user_id not provided
             insight_count = len(insights)
@@ -831,6 +841,14 @@ class DigestRepo:
         except Exception as e:
             logger.error(f"Error generating AI summary: {e}")
             return ""
+    
+    def _get_simple_fallback_summary(self, insights: List[Dict[str, Any]]) -> str:
+        """Simple fallback summary when AI service is not available"""
+        insight_count = len(insights)
+        if insight_count == 1:
+            return f"You captured 1 new insight this week. Keep building your knowledge base!"
+        else:
+            return f"You captured {insight_count} new insights this week. Great job expanding your second brain!"
 
     def get_recommended_content(self, user_id: str) -> tuple[str, str]:
         """

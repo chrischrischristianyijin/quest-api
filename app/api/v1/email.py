@@ -375,7 +375,7 @@ async def digest_preview_post(payload: dict, user_id: str = Depends(get_current_
         insights = await repo.get_recent_insights(user_id, days=7) or []
         
         # Build parameters using safe methods
-        params = _build_params(user_profile, insights)
+        params = await _build_params(user_profile, insights)
         
         # Generate simple HTML preview without template parsing
         html = _preview_html(params)
@@ -416,7 +416,7 @@ async def digest_preview_get(user_id: str = Depends(get_current_user_id)):
         insights = await repo.get_recent_insights(user_id, days=7) or []
         
         # Build parameters using safe methods
-        params = _build_params(user_profile, insights)
+        params = await _build_params(user_profile, insights)
         
         # Generate simple HTML preview without template parsing
         html = _preview_html(params)
@@ -734,7 +734,7 @@ async def test_send_digest(
         if not user_profile:
             user_profile = {"id": user_id, "first_name": "User"}
         
-        params = _build_params(user_profile, insights)
+        params = await _build_params(user_profile, insights)
         result["params_sample"] = {k: (v if k != "tags" else v[:2]) for k, v in params.items()}
         
         # Debug logging for params
@@ -895,7 +895,7 @@ def _summarize_by_tag(insights: List[Dict[str, Any]]) -> List[Dict[str, str]]:
     logger.info(f"📧 TAG DEBUG: Final tags summary: {result}")
     return result
 
-def _build_params(user_profile: Dict[str, Any], insights: List[Dict[str, Any]]) -> Dict[str, Any]:
+async def _build_params(user_profile: Dict[str, Any], insights: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Build email template parameters from user profile and insights."""
     logger.info(f"📧 PARAMS BUILD: Processing {len(insights)} insights for user {user_profile.get('id', 'unknown')}")
     
@@ -908,7 +908,7 @@ def _build_params(user_profile: Dict[str, Any], insights: List[Dict[str, Any]]) 
     
     # Keep AI summary/recommendation defensive if repo returns None
     try:
-        ai_summary = _safe_str(repo.get_ai_summary(insights, user_profile.get("id")))
+        ai_summary = _safe_str(await repo.get_ai_summary(insights, user_profile.get("id")))
         logger.info(f"📧 PARAMS BUILD: AI summary generated successfully, length: {len(ai_summary)}")
     except Exception as e:
         logger.warning(f"📧 PARAMS BUILD: AI summary failed, using fallback: {e}")
