@@ -577,4 +577,42 @@ Email Preferences: https://quest.example.com/settings
                 "success": False,
                 "error": str(e)
             }
+    
+    async def send_digest_email(
+        self, 
+        user_data: Dict[str, Any], 
+        digest_payload: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Public method to send a digest email (for testing purposes).
+        
+        Args:
+            user_data: User information including email
+            digest_payload: Generated digest content
+        
+        Returns:
+            Dict with send result
+        """
+        try:
+            # Render the email content
+            render_result = await self._render_email_content(digest_payload)
+            if not render_result["success"]:
+                return {
+                    "success": False,
+                    "error": f"Failed to render email: {render_result['error']}"
+                }
+            
+            # Send the email
+            send_result = await self._send_digest_email(
+                user_data, render_result, digest_payload
+            )
+            
+            return send_result
+            
+        except Exception as e:
+            logger.error(f"Error in send_digest_email: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
 
