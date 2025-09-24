@@ -156,5 +156,77 @@ services:
         value: 30
       - key: BATCH_SIZE_LIMIT
         value: 200
+      # Email system configuration
+      - key: CRON_SECRET
+        value: your-secure-random-string-here
+      - key: BREVO_API_KEY
+        value: your_brevo_api_key_here
+      - key: SENDER_EMAIL
+        value: contact@myquestspace.com
+      - key: SENDER_NAME
+        value: Quest
+      - key: UNSUBSCRIBE_BASE_URL
+        value: https://myquestspace.com
     autoDeploy: true
     branch: main
+
+  # Email Digest Cron Job
+  - type: cron
+    name: email-digest-cron
+    env: python
+    plan: free
+    buildCommand: echo "Email digest cron job setup"
+    startCommand: python -c "
+import requests
+import os
+import sys
+import time
+from datetime import datetime
+
+def call_digest_endpoint():
+    try:
+        print(f'[{datetime.now()}] Starting email digest cron job...')
+        
+        # Get the API URL from environment or use default
+        api_url = os.getenv('API_BASE_URL', 'https://quest-api-edz1.onrender.com')
+        cron_secret = os.getenv('CRON_SECRET', '')
+        
+        if not cron_secret:
+            print('ERROR: CRON_SECRET environment variable not set')
+            sys.exit(1)
+        
+        # Call the digest endpoint
+        response = requests.post(
+            f'{api_url}/api/v1/email/cron/digest',
+            headers={'X-Cron-Secret': cron_secret},
+            timeout=60  # 60 second timeout
+        )
+        
+        print(f'[{datetime.now()}] Cron response: {response.status_code}')
+        print(f'[{datetime.now()}] Response body: {response.text}')
+        
+        if response.status_code == 200:
+            print(f'[{datetime.now()}] ✅ Email digest cron completed successfully')
+        else:
+            print(f'[{datetime.now()}] ❌ Email digest cron failed with status {response.status_code}')
+            sys.exit(1)
+            
+    except requests.exceptions.Timeout:
+        print(f'[{datetime.now()}] ❌ Request timeout - API may be slow to respond')
+        sys.exit(1)
+    except requests.exceptions.ConnectionError:
+        print(f'[{datetime.now()}] ❌ Connection error - API may be down')
+        sys.exit(1)
+    except Exception as e:
+        print(f'[{datetime.now()}] ❌ Unexpected error: {str(e)}')
+        sys.exit(1)
+
+if __name__ == '__main__':
+    call_digest_endpoint()
+"
+    schedule: "0 */1 * * *"  # Every hour at minute 0
+    envVars:
+      - key: CRON_SECRET
+        value: your-secure-random-string-here
+      - key: API_BASE_URL
+        value: https://quest-api-edz1.onrender.com
