@@ -305,14 +305,15 @@ Insights to analyze:
 
 Please provide your analysis as 5 concise bullet points, each starting with a • symbol. Each bullet point should be 1-2 sentences and focus on the most significant patterns, correlations, or insights you've identified.
 
-Format your response as:
+IMPORTANT: Format your response exactly as shown below with each bullet point on a separate line:
+
 • [Key insight or pattern 1]
 • [Key insight or pattern 2]
 • [Key insight or pattern 3]
 • [Key insight or pattern 4]
 • [Key insight or pattern 5]
 
-If you find fewer than 5 distinct patterns, provide the most significant ones you can identify."""
+If you find fewer than 5 distinct patterns, provide the most significant ones you can identify. Make sure each bullet point is on its own line."""
     
     async def _call_chatgpt_api(self, prompt: str) -> Optional[str]:
         """
@@ -357,7 +358,9 @@ If you find fewer than 5 distinct patterns, provide the most significant ones yo
                 content = response.choices[0].message.content
                 if content and content.strip():
                     logger.info("ChatGPT API call successful")
-                    return content.strip()
+                    # Post-process to ensure proper bullet point formatting
+                    formatted_content = self._format_ai_summary(content.strip())
+                    return formatted_content
             
             logger.warning("ChatGPT API returned empty response")
             return None
@@ -365,6 +368,63 @@ If you find fewer than 5 distinct patterns, provide the most significant ones yo
         except Exception as e:
             logger.error(f"ChatGPT API call failed: {e}")
             return None
+    
+    def _format_ai_summary(self, content: str) -> str:
+        """
+        Format AI summary to ensure proper bullet point structure
+        
+        Args:
+            content: Raw AI summary content
+            
+        Returns:
+            Formatted summary with proper line breaks
+        """
+        try:
+            # Split by lines and process each line
+            lines = content.split('\n')
+            formatted_lines = []
+            
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                    
+                # If line starts with bullet point, keep it as is
+                if line.startswith('•'):
+                    formatted_lines.append(line)
+                # If line looks like a bullet point but doesn't start with •
+                elif line.startswith('-') or line.startswith('*'):
+                    formatted_lines.append('• ' + line[1:].strip())
+                # If line doesn't start with bullet but should be a bullet point
+                elif any(keyword in line.lower() for keyword in ['insight', 'pattern', 'trend', 'connection', 'theme']):
+                    # Check if it's likely a bullet point by position or content
+                    if len(formatted_lines) > 0 or line.startswith(('This week', 'Your', 'The')):
+                        formatted_lines.append('• ' + line)
+                    else:
+                        formatted_lines.append(line)
+                else:
+                    formatted_lines.append(line)
+            
+            # Join with proper line breaks
+            result = '\n'.join(formatted_lines)
+            
+            # Ensure we have proper bullet points
+            if not any(line.startswith('•') for line in result.split('\n')):
+                # If no bullet points found, try to create them from sentences
+                sentences = result.split('. ')
+                if len(sentences) > 1:
+                    bullet_points = []
+                    for sentence in sentences:
+                        if sentence.strip():
+                            bullet_points.append('• ' + sentence.strip().rstrip('.'))
+                    result = '\n'.join(bullet_points)
+            
+            logger.info(f"Formatted AI summary: {len(result)} characters, {len(result.split('•')) - 1} bullet points")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error formatting AI summary: {e}")
+            return content  # Return original content if formatting fails
     
     def _get_fallback_summary(self, user_id: str) -> str:
         """

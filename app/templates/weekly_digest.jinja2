@@ -39,7 +39,18 @@
 
     <h3 style="color:#1f2937;margin-top:30px;">AI Summary:</h3>
     <div style="background-color:#f0f9ff;padding:15px;border-radius:8px;margin:15px 0;">
-      {% if params.ai_summary %}{{ params.ai_summary }}{% else %}Your AI summary will appear here once generated.{% endif %}
+      {% if params.ai_summary %}
+        {% set summary_lines = params.ai_summary.split('\n') %}
+        {% for line in summary_lines %}
+          {% if line.strip().startswith('•') %}
+            <div style="margin:8px 0;padding-left:10px;">{{ line.strip() }}</div>
+          {% elif line.strip() %}
+            <div style="margin:8px 0;">{{ line.strip() }}</div>
+          {% endif %}
+        {% endfor %}
+      {% else %}
+        Your AI summary will appear here once generated.
+      {% endif %}
     </div>
 
     <h3 style="color:#1f2937;margin-top:30px;">This Week's Recommendations:</h3>
