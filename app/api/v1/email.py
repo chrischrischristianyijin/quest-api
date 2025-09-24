@@ -271,8 +271,8 @@ async def get_email_preferences(
                 # Fall back to returning default preferences without database storage
                 default_preferences = {
                     "weekly_digest_enabled": False,  # Start with disabled by default
-                    "preferred_day": 1,  # Monday
-                    "preferred_hour": 9,  # 9 AM
+                    "preferred_day": 6,  # Saturday
+                    "preferred_hour": 20,  # 8 PM
                     "timezone": "America/Los_Angeles",  # Default timezone
                     "no_activity_policy": "skip"  # Skip if no activity
                 }

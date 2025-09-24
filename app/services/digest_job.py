@@ -146,8 +146,8 @@ class DigestJob:
         user_id = user.get("id")
         email = user.get("email")
         timezone_str = user.get("timezone", "America/Los_Angeles")
-        preferred_day = user.get("preferred_day", 1)
-        preferred_hour = user.get("preferred_hour", 9)
+        preferred_day = user.get("preferred_day", 6)  # Saturday
+        preferred_hour = user.get("preferred_hour", 20)  # 8 PM
         no_activity_policy = user.get("no_activity_policy", "skip")
         
         try:

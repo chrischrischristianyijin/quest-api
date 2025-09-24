@@ -321,8 +321,8 @@ class DigestRepo:
             default_preferences = {
                 "user_id": user_id,
                 "weekly_digest_enabled": True,
-                "preferred_day": 1,  # Monday
-                "preferred_hour": 9,  # 9 AM
+                "preferred_day": 6,  # Saturday
+                "preferred_hour": 20,  # 8 PM
                 "timezone": "UTC",
                 "no_activity_policy": "brief"
             }
