@@ -912,15 +912,17 @@ async def _build_params(user_profile: Dict[str, Any], insights: List[Dict[str, A
         logger.info(f"📧 PARAMS BUILD: AI summary generated successfully, length: {len(ai_summary)}")
     except Exception as e:
         logger.warning(f"📧 PARAMS BUILD: AI summary failed, using fallback: {e}")
-        # Fallback to simple summary
+        # Fallback to simple summary in Chinese
         insight_count = len(insights)
         if insight_count > 0:
-            ai_summary = f"You captured {insight_count} new insights this week. Great job expanding your second brain!"
+            ai_summary = f"• 本周你捕获了{insight_count}个新洞察，继续扩展你的第二大脑！"
             if tags:
                 tag_names = [tag["name"] for tag in tags]
-                ai_summary += f" Your insights were organized into {len(tags)} categories: {', '.join(tag_names[:3])}{'...' if len(tag_names) > 3 else ''}."
+                ai_summary += f"\n• 你的洞察被组织成{len(tags)}个类别：{', '.join(tag_names[:2])}{'...' if len(tag_names) > 2 else ''}"
+                if len(tag_names) > 2:
+                    ai_summary += f"\n• 主要关注领域：{tag_names[0]}和{tag_names[1]}"
         else:
-            ai_summary = "No new insights this week. Consider adding some content to build your knowledge base!"
+            ai_summary = "• 本周没有新洞察，考虑添加一些内容来构建你的知识库！"
     
     try:
         rec = repo.get_recommended_content(user_profile.get("id"))

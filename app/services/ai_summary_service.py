@@ -288,32 +288,28 @@ class AISummaryService:
         Returns:
             ChatGPT prompt
         """
-        return f"""You are an AI assistant that analyzes personal knowledge insights to identify patterns, correlations, and key themes.
+        return f"""你是一个AI助手，用于分析个人知识洞察，识别模式、关联和关键主题。
 
-Analyze the following {insight_count} insights captured this week and provide a summary with up to 5 key bullet points that:
+分析以下本周捕获的{insight_count}个洞察，并提供最多3个关键要点的总结：
 
-1. Identify common themes or patterns across the insights
-2. Highlight interesting correlations or connections between different pieces of information
-3. Extract the most valuable or actionable insights
-4. Note any emerging trends or recurring topics
-5. Provide a brief synthesis of what this week's learning reveals
+1. 识别洞察中的共同主题或模式
+2. 突出不同信息片段之间有趣的关联或联系
+3. 提取最有价值或可操作的洞察
 
-Focus on finding meaningful connections and patterns rather than just listing individual insights.
+专注于寻找有意义的连接和模式，而不是仅仅列出个人洞察。
 
-Insights to analyze:
+要分析的洞察：
 {insights_text}
 
-Please provide your analysis as 5 concise bullet points, each starting with a • symbol. Each bullet point should be 1-2 sentences and focus on the most significant patterns, correlations, or insights you've identified.
+请提供你的分析，作为3个简洁的要点，每个以•符号开头。每个要点应该是一句话，专注于你识别出的最重要的模式、关联或洞察。
 
-IMPORTANT: Format your response exactly as shown below with each bullet point on a separate line:
+重要：请用中文回复，格式如下，每个要点占一行：
 
-• [Key insight or pattern 1]
-• [Key insight or pattern 2]
-• [Key insight or pattern 3]
-• [Key insight or pattern 4]
-• [Key insight or pattern 5]
+• [关键洞察或模式1]
+• [关键洞察或模式2]  
+• [关键洞察或模式3]
 
-If you find fewer than 5 distinct patterns, provide the most significant ones you can identify. Make sure each bullet point is on its own line."""
+如果发现少于3个不同的模式，请提供你能识别的最重要的模式。确保每个要点都在单独的一行上，并且每个要点只占一行。"""
     
     async def _call_chatgpt_api(self, prompt: str) -> Optional[str]:
         """
@@ -371,35 +367,53 @@ If you find fewer than 5 distinct patterns, provide the most significant ones yo
     
     def _format_ai_summary(self, content: str) -> str:
         """
-        Format AI summary to ensure proper bullet point structure
+        Format AI summary to ensure proper bullet point structure with max 3 points, one line each
         
         Args:
             content: Raw AI summary content
             
         Returns:
-            Formatted summary with proper line breaks
+            Formatted summary with proper line breaks, max 3 bullet points
         """
         try:
             # Split by lines and process each line
             lines = content.split('\n')
             formatted_lines = []
+            bullet_count = 0
+            max_bullets = 3
             
             for line in lines:
                 line = line.strip()
                 if not line:
                     continue
+                
+                # Stop if we already have 3 bullet points
+                if bullet_count >= max_bullets:
+                    break
                     
                 # If line starts with bullet point, keep it as is
                 if line.startswith('•'):
+                    # Ensure it fits on one line (truncate if too long)
+                    if len(line) > 100:  # Limit to 100 characters per line
+                        line = line[:97] + '...'
                     formatted_lines.append(line)
+                    bullet_count += 1
                 # If line looks like a bullet point but doesn't start with •
                 elif line.startswith('-') or line.startswith('*'):
-                    formatted_lines.append('• ' + line[1:].strip())
+                    bullet_text = '• ' + line[1:].strip()
+                    if len(bullet_text) > 100:  # Limit to 100 characters per line
+                        bullet_text = bullet_text[:97] + '...'
+                    formatted_lines.append(bullet_text)
+                    bullet_count += 1
                 # If line doesn't start with bullet but should be a bullet point
-                elif any(keyword in line.lower() for keyword in ['insight', 'pattern', 'trend', 'connection', 'theme']):
+                elif any(keyword in line.lower() for keyword in ['insight', 'pattern', 'trend', 'connection', 'theme', '洞察', '模式', '趋势', '关联', '主题']):
                     # Check if it's likely a bullet point by position or content
-                    if len(formatted_lines) > 0 or line.startswith(('This week', 'Your', 'The')):
-                        formatted_lines.append('• ' + line)
+                    if len(formatted_lines) > 0 or line.startswith(('This week', 'Your', 'The', '本周', '你的', '这')):
+                        bullet_text = '• ' + line
+                        if len(bullet_text) > 100:  # Limit to 100 characters per line
+                            bullet_text = bullet_text[:97] + '...'
+                        formatted_lines.append(bullet_text)
+                        bullet_count += 1
                     else:
                         formatted_lines.append(line)
                 else:
@@ -408,15 +422,18 @@ If you find fewer than 5 distinct patterns, provide the most significant ones yo
             # Join with proper line breaks
             result = '\n'.join(formatted_lines)
             
-            # Ensure we have proper bullet points
+            # Ensure we have proper bullet points (max 3)
             if not any(line.startswith('•') for line in result.split('\n')):
                 # If no bullet points found, try to create them from sentences
                 sentences = result.split('. ')
                 if len(sentences) > 1:
                     bullet_points = []
-                    for sentence in sentences:
+                    for i, sentence in enumerate(sentences[:max_bullets]):  # Limit to 3
                         if sentence.strip():
-                            bullet_points.append('• ' + sentence.strip().rstrip('.'))
+                            bullet_text = '• ' + sentence.strip().rstrip('.')
+                            if len(bullet_text) > 100:  # Limit to 100 characters per line
+                                bullet_text = bullet_text[:97] + '...'
+                            bullet_points.append(bullet_text)
                     result = '\n'.join(bullet_points)
             
             logger.info(f"Formatted AI summary: {len(result)} characters, {len(result.split('•')) - 1} bullet points")
