@@ -125,8 +125,8 @@ class DigestRepo:
             Tuple of (insights, stacks)
         """
         try:
-            # Get insights created/updated in the time window
-            # *** FIX: Use SERVICE CLIENT to bypass RLS ***
+            # Get ALL insights first (no SQL date filtering), then filter in Python
+            # This matches the pattern used by ai_summary_service.py for consistency
             insights_response = self.supabase_service.table("insights").select(
                 """
                 id,
@@ -143,16 +143,42 @@ class DigestRepo:
                     thought
                 )
                 """
-            ).eq("user_id", user_id).gte("updated_at", start_utc.isoformat()).lt("updated_at", end_utc.isoformat()).order("updated_at", desc=True).execute()
+            ).eq("user_id", user_id).order("created_at", desc=True).execute()
             
             if hasattr(insights_response, 'error') and insights_response.error:
                 logger.error(f"Error fetching insights for user {user_id}: {insights_response.error}")
                 insights = []
             else:
-                insights = insights_response.data or []
+                all_insights = insights_response.data or []
+                logger.info(f"DIGEST REPO: Retrieved {len(all_insights)} total insights for user {user_id}")
+                
+                # Filter in Python: include items created OR updated within window
+                def _parse_dt(s: str) -> datetime:
+                    # Handle "Z" and timezone-aware strings robustly
+                    if not s:
+                        return None
+                    try:
+                        # Normalize trailing 'Z'
+                        if s.endswith("Z"):
+                            s = s[:-1] + "+00:00"
+                        return datetime.fromisoformat(s)
+                    except Exception:
+                        return None
+                
+                insights = []
+                for insight in all_insights:
+                    created_dt = _parse_dt(insight.get("created_at"))
+                    updated_dt = _parse_dt(insight.get("updated_at"))
+                    
+                    # Include if created OR updated within the time window
+                    if created_dt and start_utc <= created_dt < end_utc:
+                        insights.append(insight)
+                    elif updated_dt and start_utc <= updated_dt < end_utc:
+                        insights.append(insight)
+                
+                logger.info(f"DIGEST REPO: Filtered to {len(insights)} insights in date range {start_utc.isoformat()} to {end_utc.isoformat()}")
             
-            # Get stacks created/updated in the time window
-            # *** FIX: Use SERVICE CLIENT to bypass RLS ***
+            # Get ALL stacks first, then filter in Python (same pattern as insights)
             stacks_response = self.supabase_service.table("stacks").select(
                 """
                 id,
@@ -161,13 +187,28 @@ class DigestRepo:
                 created_at,
                 updated_at
                 """
-            ).eq("user_id", user_id).gte("updated_at", start_utc.isoformat()).lt("updated_at", end_utc.isoformat()).order("updated_at", desc=True).execute()
+            ).eq("user_id", user_id).order("created_at", desc=True).execute()
             
             if hasattr(stacks_response, 'error') and stacks_response.error:
                 logger.error(f"Error fetching stacks for user {user_id}: {stacks_response.error}")
                 stacks = []
             else:
-                stacks = stacks_response.data or []
+                all_stacks = stacks_response.data or []
+                logger.info(f"DIGEST REPO: Retrieved {len(all_stacks)} total stacks for user {user_id}")
+                
+                # Filter stacks in Python using the same date filtering logic
+                stacks = []
+                for stack in all_stacks:
+                    created_dt = _parse_dt(stack.get("created_at"))
+                    updated_dt = _parse_dt(stack.get("updated_at"))
+                    
+                    # Include if created OR updated within the time window
+                    if created_dt and start_utc <= created_dt < end_utc:
+                        stacks.append(stack)
+                    elif updated_dt and start_utc <= updated_dt < end_utc:
+                        stacks.append(stack)
+                
+                logger.info(f"DIGEST REPO: Filtered to {len(stacks)} stacks in date range")
             
             # Get stack item counts
             for stack in stacks:
