@@ -181,7 +181,7 @@ class BrevoWebhookHandler:
         logger.warning(f"Email bounced: {message_id} to {email}, reason: {bounce_type}")
         
         # Add to suppression list
-        await email_sender.add_to_suppression_list(email, "bounce")
+        await email_sender().add_to_suppression_list(email, "bounce")
         
         # Update digest status
         if user_id:
@@ -200,7 +200,7 @@ class BrevoWebhookHandler:
         logger.warning(f"Email marked as spam: {message_id} by {email}")
         
         # Add to suppression list
-        await email_sender.add_to_suppression_list(email, "complaint")
+        await email_sender().add_to_suppression_list(email, "complaint")
         
         # Update digest status
         if user_id:
@@ -223,7 +223,7 @@ class BrevoWebhookHandler:
             await self.repo.disable_user_digest(user_id)
         
         # Add to suppression list
-        await email_sender.add_to_suppression_list(email, "unsubscribe")
+        await email_sender().add_to_suppression_list(email, "unsubscribe")
         
         return {"status": "unsubscribed", "email": email}
     
@@ -239,7 +239,7 @@ class BrevoWebhookHandler:
         logger.warning(f"Email blocked: {message_id} to {email}, reason: {block_reason}")
         
         # Add to suppression list
-        await email_sender.add_to_suppression_list(email, "bounce")
+        await email_sender().add_to_suppression_list(email, "bounce")
         
         # Update digest status
         if user_id:

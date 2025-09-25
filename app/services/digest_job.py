@@ -590,7 +590,7 @@ Email Preferences: https://quest.example.com/settings
     ) -> Dict[str, Any]:
         """Send the digest email."""
         try:
-            result = await email_sender.send_weekly_digest(
+            result = await email_sender().send_weekly_digest(
                 to_email=user["email"],
                 user_id=user["id"],
                 subject=render_result["subject"],
