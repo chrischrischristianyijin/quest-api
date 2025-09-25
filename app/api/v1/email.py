@@ -1072,11 +1072,16 @@ async def send_digest_to_all_users(
         repo = DigestRepo()
         user_profile = await repo.get_user_profile_data(user_id)
         
+        # Debug logging
+        logger.info(f"🔍 ADMIN DEBUG: user_profile = {user_profile}")
+        logger.info(f"🔍 ADMIN DEBUG: is_admin field = {user_profile.get('is_admin') if user_profile else 'No profile'}")
+        
         # Check if user has admin privileges
         is_admin = False
         if user_profile:
             # Option 1: Check for admin field in profile
             is_admin = user_profile.get("is_admin", False)
+            logger.info(f"🔍 ADMIN DEBUG: is_admin result = {is_admin}")
             
             # Option 2: Check for specific email domains
             user_email = user_profile.get("email", "")
