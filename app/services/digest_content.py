@@ -553,21 +553,31 @@ class DigestContentGenerator:
         """
         try:
             if not insights:
+                logger.info("No insights provided for tags section")
                 return []
+            
+            logger.info(f"Processing {len(insights)} insights for tags section")
             
             # Group insights by tags
             tags_dict = {}
+            tagged_insights = 0
+            
             for insight in insights:
                 insight_tags = insight.get("tags", []) or []
                 insight_title = insight.get("title", "Untitled").strip()
+                
+                logger.info(f"Insight '{insight_title}' has tags: {insight_tags}")
                 
                 if not insight_tags:
                     # Handle untagged insights
                     tags_dict.setdefault("Untagged", []).append(insight_title)
                 else:
+                    tagged_insights += 1
                     for tag in insight_tags:
                         tag_name = tag if isinstance(tag, str) else tag.get("name", "Untagged")
                         tags_dict.setdefault(tag_name, []).append(insight_title)
+            
+            logger.info(f"Found {tagged_insights} tagged insights out of {len(insights)} total")
             
             # Convert to list format expected by Brevo template
             result = []
@@ -579,10 +589,12 @@ class DigestContentGenerator:
                     "articles": article_list
                 })
             
-            logger.info(f"Created insights by tags section: {len(result)} tags")
+            logger.info(f"Created insights by tags section: {len(result)} tags with content")
             return result
             
         except Exception as e:
             logger.error(f"Error creating insights by tags section: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return []
 

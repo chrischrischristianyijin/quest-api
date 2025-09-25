@@ -355,6 +355,11 @@ class DigestJob:
             # Get user activity for the week
             insights, stacks = await self.repo.get_user_activity(user_id, start_utc, end_utc)
             
+            # Debug logging for insights
+            logger.info(f"Retrieved {len(insights)} insights and {len(stacks)} stacks for user {user_id}")
+            for i, insight in enumerate(insights[:3]):  # Log first 3 insights
+                logger.info(f"Insight {i+1}: '{insight.get('title', 'No title')}' with tags: {insight.get('tags', [])}")
+            
             # Generate content
             payload = self.content_generator.build_user_digest_payload(
                 user, insights, stacks, no_activity_policy
@@ -371,6 +376,11 @@ class DigestJob:
                     payload["ai_summary"] = "AI summary temporarily unavailable."
             else:
                 payload["ai_summary"] = "No insights available for AI summary this week."
+            
+            # Debug logging for payload structure
+            logger.info(f"Payload sections keys: {list(payload.get('sections', {}).keys())}")
+            logger.info(f"Tags section data: {payload.get('sections', {}).get('tags', [])}")
+            logger.info(f"AI summary length: {len(payload.get('ai_summary', ''))}")
             
             # Check if we should skip sending
             skip_sending = (
@@ -603,16 +613,24 @@ Email Preferences: https://quest.example.com/settings
         """Send the digest email using Brevo template."""
         try:
             # Use Brevo template instead of HTML generation
+            # Flatten tags and other template-expected fields to top level
+            template_params = {
+                "params": {
+                    **payload,  # Include all payload data
+                    "tags": payload.get("sections", {}).get("tags", []),  # Flatten tags to top level
+                    "login_url": "https://myquestspace.com/login",
+                    "unsubscribe_url": "https://myquestspace.com/unsubscribe"
+                },
+                "user": payload.get("user", {}),
+                "sections": payload.get("sections", {}),
+                "activity_summary": payload.get("activity_summary", {}),
+                "metadata": payload.get("metadata", {})
+            }
+
             result = await email_sender().send_brevo_digest(
                 to_email=user["email"],
                 to_name=user.get("first_name", "there"),
-                template_params={
-                    "params": payload,  # Brevo expects nested params structure
-                    "user": payload.get("user", {}),
-                    "sections": payload.get("sections", {}),
-                    "activity_summary": payload.get("activity_summary", {}),
-                    "metadata": payload.get("metadata", {})
-                }
+                template_params=template_params
             )
             
             return result

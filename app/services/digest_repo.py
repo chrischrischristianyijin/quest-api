@@ -170,10 +170,14 @@ class DigestRepo:
                     created_dt = _parse_dt(insight.get("created_at"))
                     updated_dt = _parse_dt(insight.get("updated_at"))
                     
-                    # Include if created OR updated within the time window
-                    if created_dt and start_utc <= created_dt < end_utc:
-                        insights.append(insight)
-                    elif updated_dt and start_utc <= updated_dt < end_utc:
+                    # Use the same logic as AI summary service: >= start_utc (more inclusive)
+                    in_window = False
+                    if created_dt and created_dt >= start_utc:
+                        in_window = True
+                    elif updated_dt and updated_dt >= start_utc:
+                        in_window = True
+                    
+                    if in_window:
                         insights.append(insight)
                 
                 logger.info(f"DIGEST REPO: Filtered to {len(insights)} insights in date range {start_utc.isoformat()} to {end_utc.isoformat()}")
@@ -196,16 +200,20 @@ class DigestRepo:
                 all_stacks = stacks_response.data or []
                 logger.info(f"DIGEST REPO: Retrieved {len(all_stacks)} total stacks for user {user_id}")
                 
-                # Filter stacks in Python using the same date filtering logic
+                # Filter stacks in Python using the same date filtering logic as insights
                 stacks = []
                 for stack in all_stacks:
                     created_dt = _parse_dt(stack.get("created_at"))
                     updated_dt = _parse_dt(stack.get("updated_at"))
                     
-                    # Include if created OR updated within the time window
-                    if created_dt and start_utc <= created_dt < end_utc:
-                        stacks.append(stack)
-                    elif updated_dt and start_utc <= updated_dt < end_utc:
+                    # Use the same logic as AI summary service: >= start_utc (more inclusive)
+                    in_window = False
+                    if created_dt and created_dt >= start_utc:
+                        in_window = True
+                    elif updated_dt and updated_dt >= start_utc:
+                        in_window = True
+                    
+                    if in_window:
                         stacks.append(stack)
                 
                 logger.info(f"DIGEST REPO: Filtered to {len(stacks)} stacks in date range")

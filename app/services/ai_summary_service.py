@@ -242,10 +242,12 @@ class AISummaryService:
             
             if insight_contents and len(insight_contents) > 0:
                 # Use summary from insight_contents if available
-                content = insight_contents[0].get('summary', '') or insight_contents[0].get('thought', '')
+                summary = insight_contents[0].get('summary') or ''
+                thought = insight_contents[0].get('thought') or ''
+                content = summary or thought
             
             # Fall back to description if no insight_contents summary
-            if not content.strip():
+            if not content or not content.strip():
                 content = insight.get('description', '')
             
             title = insight.get('title', f'Insight {i}')
