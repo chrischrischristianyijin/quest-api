@@ -38,43 +38,59 @@ class DigestRepo:
         """
         try:
             # Query users with email preferences enabled
-            response = self.supabase.table("email_preferences").select(
-                """
-                user_id,
-                weekly_digest_enabled,
-                preferred_day,
-                preferred_hour,
-                timezone,
-                no_activity_policy,
-                users!inner(
-                    id,
-                    email,
-                    first_name,
-                    name,
-                    created_at
-                )
-                """
+            # First get email preferences
+            prefs_response = self.supabase.table("email_preferences").select(
+                "user_id, weekly_digest_enabled, preferred_day, preferred_hour, timezone, no_activity_policy"
             ).eq("weekly_digest_enabled", True).execute()
             
-            if hasattr(response, 'error') and response.error:
-                logger.error(f"Error fetching sendable users: {response.error}")
+            if hasattr(prefs_response, 'error') and prefs_response.error:
+                logger.error(f"Error fetching email preferences: {prefs_response.error}")
                 return []
             
+            if not prefs_response.data:
+                logger.info("No users with weekly_digest_enabled=True found")
+                return []
+            
+            logger.info(f"Found {len(prefs_response.data)} users with weekly_digest_enabled=True")
+            
             users = []
-            for pref in response.data or []:
-                user_data = pref.get("users", {})
-                if user_data and user_data.get("email"):
-                    users.append({
-                        "id": pref["user_id"],
-                        "email": user_data["email"],
-                        "first_name": user_data.get("first_name"),
-                        "name": user_data.get("name"),
-                        "timezone": pref["timezone"],
-                        "preferred_day": pref["preferred_day"],
-                        "preferred_hour": pref["preferred_hour"],
-                        "no_activity_policy": pref["no_activity_policy"],
-                        "created_at": user_data.get("created_at")
-                    })
+            for pref in prefs_response.data:
+                user_id = pref["user_id"]
+                
+                # Get user email from auth.users
+                try:
+                    auth_response = self.supabase_service.table("auth.users").select("email").eq("id", user_id).execute()
+                    if auth_response.data and len(auth_response.data) > 0:
+                        user_email = auth_response.data[0]["email"]
+                    else:
+                        logger.warning(f"No email found for user {user_id} in auth.users")
+                        continue
+                except Exception as e:
+                    logger.warning(f"Could not fetch email for user {user_id}: {e}")
+                    continue
+                
+                # Get user profile data
+                try:
+                    profile_response = self.supabase_service.table("profiles").select(
+                        "id, nickname, username, avatar_url, bio, created_at, updated_at"
+                    ).eq("id", user_id).execute()
+                    
+                    profile_data = profile_response.data[0] if profile_response.data else {}
+                except Exception as e:
+                    logger.warning(f"Could not fetch profile for user {user_id}: {e}")
+                    profile_data = {}
+                
+                users.append({
+                    "id": user_id,
+                    "email": user_email,
+                    "first_name": profile_data.get("nickname") or profile_data.get("username", "").split("_")[0],
+                    "name": profile_data.get("nickname") or profile_data.get("username", ""),
+                    "timezone": pref["timezone"],
+                    "preferred_day": pref["preferred_day"],
+                    "preferred_hour": pref["preferred_hour"],
+                    "no_activity_policy": pref["no_activity_policy"],
+                    "created_at": profile_data.get("created_at")
+                })
             
             logger.info(f"Found {len(users)} sendable users")
             return users
