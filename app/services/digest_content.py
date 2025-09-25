@@ -110,11 +110,19 @@ class DigestContentGenerator:
         text_insights = [i for i in insights if not i.get("url")]
         
         # Get recent activity (last 3 days)
-        recent_cutoff = datetime.utcnow() - timedelta(days=3)
-        recent_insights = [
-            i for i in insights 
-            if self._parse_datetime(i.get("created_at", "")) > recent_cutoff
-        ]
+        from datetime import timezone
+        recent_cutoff = datetime.now(timezone.utc) - timedelta(days=3)
+        recent_insights = []
+        for i in insights:
+            parsed_dt = self._parse_datetime(i.get("created_at", ""))
+            if parsed_dt:
+                # Ensure both datetimes are timezone-aware for comparison
+                if parsed_dt.tzinfo is None:
+                    # Assume UTC if no timezone info
+                    parsed_dt = parsed_dt.replace(tzinfo=timezone.utc)
+                
+                if parsed_dt > recent_cutoff:
+                    recent_insights.append(i)
         
         # Calculate engagement metrics
         insights_with_summaries = [i for i in insights if self._has_summary(i)]

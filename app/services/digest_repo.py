@@ -171,7 +171,7 @@ class DigestRepo:
             # Get stack item counts
             for stack in stacks:
                 stack_id = stack["id"]
-                items_response = self.supabase.table("insights").select("id").eq("stack_id", stack_id).execute()
+                items_response = self.supabase_service.table("insights").select("id").eq("stack_id", stack_id).execute()
                 stack["item_count"] = len(items_response.data or []) if not hasattr(items_response, 'error') else 0
             
             logger.info(f"Found {len(insights)} insights and {len(stacks)} stacks for user {user_id}")
