@@ -402,21 +402,41 @@ async def digest_preview_post(payload: dict, user_id: str = Depends(get_current_
         return JSONResponse({"success": False, "message": "Failed to generate HTML preview"}, status_code=500)
 
 @router.get("/digest/preview")
-async def digest_preview_get(user_id: str = Depends(get_current_user_id)):
+async def digest_preview_get(
+    user_id: str = Depends(get_current_user_id),
+    target_user_id: Optional[str] = Query(None, description="User ID to preview for (admin only)")
+):
     """
     Returns JSON with html field for preview (used by the modal GET path).
     Hardened version that never 500s and always returns JSON.
+    
+    Args:
+        user_id: Current authenticated user ID
+        target_user_id: Optional user ID to preview for (admin only)
     """
     try:
-        # Get user profile data
+        # Determine which user to preview for
+        preview_user_id = target_user_id if target_user_id else user_id
+        
+        # Security check: if target_user_id is provided, verify admin access
+        if target_user_id and target_user_id != user_id:
+            # Check if current user is admin
+            repo = DigestRepo()
+            current_user_profile = await repo.get_user_profile_data(user_id)
+            is_admin = current_user_profile.get("is_admin", False) if current_user_profile else False
+            
+            if not is_admin:
+                return JSONResponse({"ok": False, "error": "Admin access required to preview other users"}, status_code=403)
+        
+        # Get user profile data for the target user
         repo = DigestRepo()
-        user_profile = await repo.get_user_profile_data(user_id)
+        user_profile = await repo.get_user_profile_data(preview_user_id)
         if not user_profile:
             # Return safe fallback instead of 404
-            user_profile = {"id": user_id, "first_name": "User"}
+            user_profile = {"id": preview_user_id, "first_name": "User"}
         
-        # Get recent insights (tolerate empty insight sets)
-        insights = await repo.get_recent_insights(user_id, days=7) or []
+        # Get recent insights for the target user (tolerate empty insight sets)
+        insights = await repo.get_recent_insights(preview_user_id, days=7) or []
         
         # Build parameters using safe methods
         params = await _build_params(user_profile, insights)
@@ -697,8 +717,15 @@ async def test_send_digest(
             no_activity_policy=prefs_raw.get("no_activity_policy", "skip"),
         )
 
-        # Get recent insights
-        insights = await repo.get_recent_insights(user_id, days=7) or []
+        # Get recent insights - if email_override is provided, we need to find the target user
+        target_user_id = user_id
+        if email_override:
+            # Find user by email (extract from email_override)
+            # For now, we'll use the current user's insights, but this should be improved
+            # to find the actual user by email
+            target_user_id = user_id
+        
+        insights = await repo.get_recent_insights(target_user_id, days=7) or []
         has_insights = len(insights) > 0
         
         # Debug logging
