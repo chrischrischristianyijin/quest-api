@@ -55,7 +55,10 @@ class DigestRepo:
             
             users = []
             for pref in prefs_response.data:
-                user_id = pref["user_id"]
+                user_id = pref.get("user_id")
+                if not user_id:
+                    logger.warning(f"⚠️ DIGEST REPO: No user_id found in preference: {pref}")
+                    continue
                 
                 # Get user email from auth.users
                 try:
@@ -312,6 +315,12 @@ class DigestRepo:
             
             data = response.data or []
             result = data[0] if data else None
+            
+            # Ensure user_id is included in the result
+            if result:
+                result["user_id"] = user_id
+                logger.info(f"🔐 DIGEST REPO: Added user_id to preferences: {result}")
+            
             logger.info(f"🔐 DIGEST REPO: Returning preferences: {result}")
             return result
             
