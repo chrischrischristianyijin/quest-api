@@ -38,8 +38,8 @@ class DigestRepo:
         """
         try:
             # Query users with email preferences enabled
-            # First get email preferences
-            prefs_response = self.supabase.table("email_preferences").select(
+            # First get email preferences (use service role to bypass RLS)
+            prefs_response = self.supabase_service.table("email_preferences").select(
                 "user_id, weekly_digest_enabled, preferred_day, preferred_hour, timezone, no_activity_policy"
             ).eq("weekly_digest_enabled", True).execute()
             
@@ -60,9 +60,9 @@ class DigestRepo:
                     logger.warning(f"⚠️ DIGEST REPO: No user_id found in preference: {pref}")
                     continue
                 
-                # Get user email from auth.users
+                # Get user email from auth.users (use correct schema)
                 try:
-                    auth_response = self.supabase_service.table("auth.users").select("email").eq("id", user_id).execute()
+                    auth_response = self.supabase_service.schema("auth").table("users").select("email").eq("id", user_id).execute()
                     if auth_response.data and len(auth_response.data) > 0:
                         user_email = auth_response.data[0]["email"]
                     else:
@@ -72,11 +72,11 @@ class DigestRepo:
                     logger.warning(f"Could not fetch email for user {user_id}: {e}")
                     continue
                 
-                # Get user profile data
+                # Get user profile data (use uuid column name)
                 try:
                     profile_response = self.supabase_service.table("profiles").select(
-                        "id, nickname, username, avatar_url, bio, created_at, updated_at"
-                    ).eq("id", user_id).execute()
+                        "uuid, nickname, username, avatar_url, bio, created_at, updated_at"
+                    ).eq("uuid", user_id).execute()
                     
                     profile_data = profile_response.data[0] if profile_response.data else {}
                 except Exception as e:
@@ -92,7 +92,8 @@ class DigestRepo:
                     "preferred_day": pref["preferred_day"],
                     "preferred_hour": pref["preferred_hour"],
                     "no_activity_policy": pref["no_activity_policy"],
-                    "created_at": profile_data.get("created_at")
+                    "created_at": profile_data.get("created_at"),
+                    "uuid": profile_data.get("uuid")  # Include uuid for reference
                 })
             
             logger.info(f"Found {len(users)} sendable users")
