@@ -60,28 +60,31 @@ class DigestRepo:
                     logger.warning(f"⚠️ DIGEST REPO: No user_id found in preference: {pref}")
                     continue
                 
-                # Get user email from auth.users (use correct schema)
-                try:
-                    auth_response = self.supabase_service.schema("auth").table("users").select("email").eq("id", user_id).execute()
-                    if auth_response.data and len(auth_response.data) > 0:
-                        user_email = auth_response.data[0]["email"]
-                    else:
-                        logger.warning(f"No email found for user {user_id} in auth.users")
-                        continue
-                except Exception as e:
-                    logger.warning(f"Could not fetch email for user {user_id}: {e}")
-                    continue
+                # Get user email from profiles table (extract from username)
+                # This is simpler and more reliable than accessing auth.users
+                user_email = None
                 
-                # Get user profile data (use uuid column name)
+                # Get user profile data and extract email from username
                 try:
                     profile_response = self.supabase_service.table("profiles").select(
-                        "uuid, nickname, username, avatar_url, bio, created_at, updated_at"
-                    ).eq("uuid", user_id).execute()
+                        "id, nickname, username, avatar_url, bio, created_at, updated_at"
+                    ).eq("id", user_id).execute()
                     
                     profile_data = profile_response.data[0] if profile_response.data else {}
+                    
+                    # Extract email from username (first half before _) + @gmail.com
+                    if profile_data and profile_data.get("username"):
+                        username = profile_data["username"]
+                        email_prefix = username.split("_")[0]
+                        user_email = f"{email_prefix}@gmail.com"
+                        logger.info(f"✅ Extracted email for user {user_id}: {user_email} (from username: {username})")
+                    else:
+                        logger.warning(f"No username found for user {user_id} in profiles")
+                        continue
+                        
                 except Exception as e:
                     logger.warning(f"Could not fetch profile for user {user_id}: {e}")
-                    profile_data = {}
+                    continue
                 
                 users.append({
                     "id": user_id,
@@ -93,7 +96,7 @@ class DigestRepo:
                     "preferred_hour": pref["preferred_hour"],
                     "no_activity_policy": pref["no_activity_policy"],
                     "created_at": profile_data.get("created_at"),
-                    "uuid": profile_data.get("uuid")  # Include uuid for reference
+                    "profile_id": profile_data.get("id")  # Include profile id for reference
                 })
             
             logger.info(f"Found {len(users)} sendable users")
