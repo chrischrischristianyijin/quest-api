@@ -273,11 +273,24 @@ class DigestRepo:
             return digest_id
             
         except Exception as e:
-            logger.error(f"❌ Error creating digest record for user {user_id}, week {week_start}: {e}")
-            logger.error(f"❌ Error type: {type(e).__name__}")
-            import traceback
-            logger.error(f"❌ Traceback: {traceback.format_exc()}")
-            raise
+            # Handle unique constraint violation when Supabase throws APIError exception
+            if "duplicate key value violates unique constraint" in str(e) and "email_digests_user_id_week_start_key" in str(e):
+                logger.warning(f"⚠️ Digest record already exists (race condition) for user {user_id}, week {week_start} - fetching existing record")
+                # Fetch the existing record that was created by another process
+                existing = await self.get_digest_by_user_week(user_id, week_start)
+                if existing:
+                    logger.info(f"✅ Found existing digest record {existing['id']} for user {user_id}, week {week_start}")
+                    return existing["id"]
+                else:
+                    logger.error(f"❌ Constraint violation but no existing record found for user {user_id}, week {week_start}")
+                    raise Exception(f"Unique constraint violation but no existing record found: {e}")
+            else:
+                # Re-raise other exceptions
+                logger.error(f"❌ Error creating digest record for user {user_id}, week {week_start}: {e}")
+                logger.error(f"❌ Error type: {type(e).__name__}")
+                import traceback
+                logger.error(f"❌ Traceback: {traceback.format_exc()}")
+                raise
     
     async def update_digest(
         self, 
