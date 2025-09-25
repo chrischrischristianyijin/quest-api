@@ -194,7 +194,11 @@ class DigestRepo:
         """
         try:
             logger.info(f"🔍 Checking for existing digest: user {user_id}, week {week_start}")
-            response = self.supabase.table("email_digests").select("*").eq("user_id", user_id).eq("week_start", week_start.isoformat()).execute()
+            response = self.supabase_service.table("email_digests").select("*") \
+                .eq("user_id", user_id) \
+                .eq("week_start", week_start.isoformat()) \
+                .limit(1) \
+                .execute()
             
             if hasattr(response, 'error') and response.error:
                 logger.error(f"❌ Error fetching digest for user {user_id}, week {week_start}: {response.error}")
@@ -222,7 +226,7 @@ class DigestRepo:
         status: str
     ) -> str:
         """
-        Create a new digest record with retry logic for race conditions.
+        Create a new digest record using atomic upsert.
         
         Args:
             user_id: User ID
@@ -232,90 +236,25 @@ class DigestRepo:
         Returns:
             Digest record ID
         """
-        import asyncio
-        
-        max_retries = 3
-        base_delay = 0.1  # 100ms base delay
-        
-        for attempt in range(max_retries + 1):
-            try:
-                # Check if record already exists before creating
-                existing = await self.get_digest_by_user_week(user_id, week_start)
-                if existing:
-                    logger.warning(f"⚠️ Digest record already exists for user {user_id}, week {week_start} - returning existing ID: {existing['id']}")
-                    return existing["id"]
-                
-                logger.info(f"📝 Creating new digest record for user {user_id}, week {week_start}, status {status} (attempt {attempt + 1})")
-                response = self.supabase_service.table("email_digests").insert({
-                    "user_id": user_id,
-                    "week_start": week_start.isoformat(),
-                    "status": status,
-                    "retry_count": 0
-                }).execute()
-                
-                if hasattr(response, 'error') and response.error:
-                    # Handle unique constraint violation gracefully
-                    if "duplicate key value violates unique constraint" in str(response.error) and "email_digests_user_id_week_start_key" in str(response.error):
-                        logger.warning(f"⚠️ Digest record already exists (race condition) for user {user_id}, week {week_start} - attempt {attempt + 1}")
-                        
-                        # Add exponential backoff delay to allow for database consistency
-                        if attempt < max_retries:
-                            delay = base_delay * (2 ** attempt)
-                            logger.info(f"⏳ Waiting {delay:.2f}s before retry...")
-                            await asyncio.sleep(delay)
-                            continue
-                        
-                        # Final attempt - fetch the existing record
-                        existing = await self.get_digest_by_user_week(user_id, week_start)
-                        if existing:
-                            logger.info(f"✅ Found existing digest record {existing['id']} for user {user_id}, week {week_start}")
-                            return existing["id"]
-                        else:
-                            logger.error(f"❌ Constraint violation but no existing record found for user {user_id}, week {week_start} after {max_retries + 1} attempts")
-                            raise Exception(f"Unique constraint violation but no existing record found after retries: {response.error}")
-                    else:
-                        logger.error(f"❌ Error creating digest record: {response.error}")
-                        logger.error(f"❌ User ID: {user_id}, Week: {week_start}, Status: {status}")
-                        raise Exception(f"Failed to create digest record: {response.error}")
-                
-                if not response.data or len(response.data) == 0:
-                    logger.error(f"❌ No data returned when creating digest record for user {user_id}")
-                    raise Exception("No data returned when creating digest record")
-                
-                digest_id = response.data[0]["id"]
-                logger.info(f"✅ Created digest record {digest_id} for user {user_id}, week {week_start}")
-                return digest_id
-                
-            except Exception as e:
-                # Handle unique constraint violation when Supabase throws APIError exception
-                if "duplicate key value violates unique constraint" in str(e) and "email_digests_user_id_week_start_key" in str(e):
-                    logger.warning(f"⚠️ Digest record already exists (race condition) for user {user_id}, week {week_start} - attempt {attempt + 1}")
-                    
-                    # Add exponential backoff delay to allow for database consistency
-                    if attempt < max_retries:
-                        delay = base_delay * (2 ** attempt)
-                        logger.info(f"⏳ Waiting {delay:.2f}s before retry...")
-                        await asyncio.sleep(delay)
-                        continue
-                    
-                    # Final attempt - fetch the existing record
-                    existing = await self.get_digest_by_user_week(user_id, week_start)
-                    if existing:
-                        logger.info(f"✅ Found existing digest record {existing['id']} for user {user_id}, week {week_start}")
-                        return existing["id"]
-                    else:
-                        logger.error(f"❌ Constraint violation but no existing record found for user {user_id}, week {week_start} after {max_retries + 1} attempts")
-                        raise Exception(f"Unique constraint violation but no existing record found after retries: {e}")
-                else:
-                    # Re-raise other exceptions
-                    logger.error(f"❌ Error creating digest record for user {user_id}, week {week_start}: {e}")
-                    logger.error(f"❌ Error type: {type(e).__name__}")
-                    import traceback
-                    logger.error(f"❌ Traceback: {traceback.format_exc()}")
-                    raise
-        
-        # This should never be reached, but just in case
-        raise Exception(f"Failed to create digest record after {max_retries + 1} attempts")
+        payload = {
+            "user_id": user_id,
+            "week_start": week_start.isoformat(),
+            "status": status,
+            "retry_count": 0
+        }
+        resp = self.supabase_service.table("email_digests") \
+            .upsert(payload, on_conflict=["user_id", "week_start"]) \
+            .execute()
+        if hasattr(resp, "error") and resp.error:
+            raise Exception(f"Failed to upsert digest record: {resp.error}")
+        if resp.data and len(resp.data) > 0:
+            logger.info(f"✅ Upserted digest record {resp.data[0]['id']} for user {user_id}, week {week_start}")
+            return resp.data[0]["id"]
+        existing = await self.get_digest_by_user_week(user_id, week_start)
+        if not existing:
+            raise Exception("Upsert succeeded but could not fetch digest record")
+        logger.info(f"✅ Found existing digest record {existing['id']} for user {user_id}, week {week_start}")
+        return existing["id"]
     
     async def update_digest(
         self, 
@@ -349,7 +288,10 @@ class DigestRepo:
             
             if error is not None:
                 update_data["error"] = error
-                update_data["retry_count"] = self.supabase_service.rpc("increment_retry_count", {"digest_id": digest_id}).execute()
+                # increment server-side; don't assign RPC response into the row
+                rpc_resp = self.supabase_service.rpc("increment_retry_count", {"digest_id": digest_id}).execute()
+                if hasattr(rpc_resp, "error") and rpc_resp.error:
+                    logger.warning(f"increment_retry_count failed: {rpc_resp.error}")
             
             if payload is not None:
                 update_data["payload"] = payload
@@ -575,9 +517,9 @@ class DigestRepo:
             True if successful
         """
         try:
-            response = self.supabase.table("email_preferences").update({
-                "weekly_digest_enabled": False
-            }).eq("user_id", user_id).execute()
+            response = self.supabase_service.table("email_preferences") \
+                .update({"weekly_digest_enabled": False}) \
+                .eq("user_id", user_id).execute()
             
             if hasattr(response, 'error') and response.error:
                 logger.error(f"Error disabling digest for user {user_id}: {response.error}")
