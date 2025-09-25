@@ -32,12 +32,13 @@ class DigestJob:
         self.config = config or DigestJobConfig()
         self.content_generator = DigestContentGenerator()
     
-    async def run_sweep(self, now_utc: Optional[datetime] = None) -> Dict[str, Any]:
+    async def run_sweep(self, now_utc: Optional[datetime] = None, force_send: bool = False) -> Dict[str, Any]:
         """
         Run the digest sweep for all eligible users.
         
         Args:
             now_utc: Current UTC time (for testing)
+            force_send: If True, bypass scheduling logic and send to all eligible users
         
         Returns:
             Dict with sweep results
@@ -45,7 +46,10 @@ class DigestJob:
         if now_utc is None:
             now_utc = datetime.now(timezone.utc)
         
-        logger.info(f"Starting digest sweep at {now_utc.isoformat()}")
+        if force_send:
+            logger.info(f"🚀 Starting FORCE digest sweep at {now_utc.isoformat()} - bypassing scheduling logic")
+        else:
+            logger.info(f"Starting digest sweep at {now_utc.isoformat()}")
         
         try:
             # Get all users eligible for digest
@@ -73,7 +77,7 @@ class DigestJob:
             
             for i in range(0, len(eligible_users), self.config.batch_size):
                 batch = eligible_users[i:i + self.config.batch_size]
-                batch_results = await self._process_batch(batch, now_utc)
+                batch_results = await self._process_batch(batch, now_utc, force_send)
                 
                 # Aggregate results
                 for key in ["processed", "sent", "skipped", "failed"]:
@@ -99,7 +103,7 @@ class DigestJob:
                 "timestamp": now_utc.isoformat()
             }
     
-    async def _process_batch(self, users: List[Dict[str, Any]], now_utc: datetime) -> Dict[str, Any]:
+    async def _process_batch(self, users: List[Dict[str, Any]], now_utc: datetime, force_send: bool = False) -> Dict[str, Any]:
         """Process a batch of users."""
         results = {
             "processed": 0,
@@ -111,7 +115,7 @@ class DigestJob:
         
         for user in users:
             try:
-                result = await self._process_user(user, now_utc)
+                result = await self._process_user(user, now_utc, force_send)
                 results["processed"] += 1
                 results[result["status"]] += 1
                 
@@ -132,7 +136,7 @@ class DigestJob:
         
         return results
     
-    async def _process_user(self, user: Dict[str, Any], now_utc: datetime) -> Dict[str, Any]:
+    async def _process_user(self, user: Dict[str, Any], now_utc: datetime, force_send: bool = False) -> Dict[str, Any]:
         """
         Process a single user for digest sending.
         
@@ -151,8 +155,8 @@ class DigestJob:
         no_activity_policy = user.get("no_activity_policy", "skip")
         
         try:
-            # Check if it's time to send
-            if not should_send_now(timezone_str, preferred_day, preferred_hour, now_utc):
+            # Check if it's time to send (skip this check in force mode)
+            if not force_send and not should_send_now(timezone_str, preferred_day, preferred_hour, now_utc):
                 return {
                     "status": "skipped",
                     "reason": "not_send_time",

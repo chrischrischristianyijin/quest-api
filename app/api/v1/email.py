@@ -531,30 +531,32 @@ async def unsubscribe_user_get(
 async def run_digest_cron(
     background_tasks: BackgroundTasks,
     request: Request,
+    force: bool = False,
     _: bool = Depends(verify_cron_secret)
 ):
     """Run the digest cron job (called by scheduler)."""
     try:
-        # Run digest job in background
-        background_tasks.add_task(run_digest_job)
+        # Run digest job in background with force parameter
+        background_tasks.add_task(run_digest_job, force=force)
         
         return {
             "success": True,
             "message": "Digest job started",
+            "force_mode": force,
             "timestamp": datetime.utcnow().isoformat()
         }
     except Exception as e:
         logger.error(f"Error starting digest job: {e}")
         raise HTTPException(status_code=500, detail="Failed to start digest job")
 
-async def run_digest_job():
+async def run_digest_job(force: bool = False):
     """Background task to run the digest job."""
     try:
         repo = DigestRepo()
         config = DigestJobConfig()
         job = DigestJob(repo, config)
         
-        result = await job.run_sweep()
+        result = await job.run_sweep(force_send=force)
         logger.info(f"Digest job completed: {result}")
     except Exception as e:
         logger.error(f"Digest job failed: {e}")
@@ -1075,12 +1077,14 @@ async def send_digest_to_all_users(
         # Debug logging
         logger.info(f"🔍 ADMIN DEBUG: user_profile = {user_profile}")
         logger.info(f"🔍 ADMIN DEBUG: is_admin field = {user_profile.get('is_admin') if user_profile else 'No profile'}")
+        logger.info(f"🔍 ADMIN DEBUG: all profile keys = {list(user_profile.keys()) if user_profile else 'No profile'}")
         
         # Check if user has admin privileges
         is_admin = False
         if user_profile:
-            # Option 1: Check for admin field in profile
-            is_admin = user_profile.get("is_admin", False)
+            # Option 1: Check for admin field in profile (handle both boolean and string)
+            admin_value = user_profile.get("is_admin", False)
+            is_admin = admin_value in [True, "true", "True", "1", 1]
             logger.info(f"🔍 ADMIN DEBUG: is_admin result = {is_admin}")
             
             # Option 2: Check for specific email domains
