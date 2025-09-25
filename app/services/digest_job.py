@@ -588,18 +588,18 @@ Email Preferences: https://quest.example.com/settings
         render_result: Dict[str, Any],
         payload: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """Send the digest email."""
+        """Send the digest email using Brevo template."""
         try:
-            result = await email_sender().send_weekly_digest(
+            # Use Brevo template instead of HTML generation
+            result = await email_sender().send_brevo_digest(
                 to_email=user["email"],
-                user_id=user["id"],
-                subject=render_result["subject"],
-                html_content=render_result["html_content"],
-                text_content=render_result["text_content"],
-                template_vars=payload,
-                headers={
-                    "X-Quest-Digest-Week": payload.get("metadata", {}).get("week_start", ""),
-                    "X-Quest-Digest-Type": "weekly"
+                to_name=user.get("first_name", "there"),
+                template_params={
+                    "params": payload,  # Brevo expects nested params structure
+                    "user": payload.get("user", {}),
+                    "sections": payload.get("sections", {}),
+                    "activity_summary": payload.get("activity_summary", {}),
+                    "metadata": payload.get("metadata", {})
                 }
             )
             

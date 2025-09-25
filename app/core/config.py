@@ -53,7 +53,7 @@ class Settings(BaseSettings):
     
     # Brevo 邮件配置
     BREVO_API_KEY: str = ""
-    BREVO_TEMPLATE_ID: int = 0
+    BREVO_TEMPLATE_ID: int = 1
     APP_BASE_URL: str = "https://myquestspace.com"
     UNSUBSCRIBE_BASE_URL: str = "https://myquestspace.com/unsubscribe"
     
