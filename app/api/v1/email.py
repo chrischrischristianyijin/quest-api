@@ -3,6 +3,7 @@ Email API endpoints for digest system.
 Handles preview, preferences, unsubscribe, and cron operations.
 """
 import logging
+import asyncio
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional
 from pathlib import Path
@@ -975,4 +976,212 @@ async def debug_ai_summary(user_id: str = Depends(get_current_user_id)):
     except Exception as e:
         import traceback
         return {"error": str(e), "traceback": traceback.format_exc()}
+
+@router.post("/digest/send-all")
+async def send_digest_to_all_users(
+    force: bool = Query(True),
+    dry_run: bool = Query(False),
+    user_id: str = Depends(get_current_user_id)
+):
+    """
+    Send digest emails to ALL eligible users immediately.
+    
+    This bypasses timing restrictions and sends personalized emails to all users
+    who have weekly_digest_enabled=True.
+    
+    Args:
+        force: Always True (bypasses timing)
+        dry_run: If True, builds emails but doesn't send them
+        user_id: Current user ID (for authentication)
+    
+    Returns:
+        Dict with results of the bulk send operation
+    """
+    try:
+        logger.info(f"🚀 BULK SEND: Starting bulk digest send for all users (dry_run={dry_run})")
+        
+        # Initialize services
+        repo = DigestRepo()
+        config = DigestJobConfig()
+        job = DigestJob(repo, config)
+        
+        # Get current time for the sweep
+        now_utc = datetime.now(timezone.utc)
+        
+        # Get all eligible users
+        eligible_users = await repo.get_sendable_users(now_utc)
+        logger.info(f"🚀 BULK SEND: Found {len(eligible_users)} eligible users")
+        
+        if not eligible_users:
+            return {
+                "success": True,
+                "message": "No eligible users found",
+                "processed": 0,
+                "sent": 0,
+                "skipped": 0,
+                "failed": 0,
+                "users": []
+            }
+        
+        # If dry_run, just return the user list and what would be sent
+        if dry_run:
+            logger.info(f"🚀 BULK SEND: Dry run mode - would send to {len(eligible_users)} users")
+            return {
+                "success": True,
+                "message": f"Dry run: Would send to {len(eligible_users)} users",
+                "processed": len(eligible_users),
+                "sent": 0,
+                "skipped": 0,
+                "failed": 0,
+                "dry_run": True,
+                "users": [
+                    {
+                        "id": user["id"],
+                        "email": user["email"],
+                        "first_name": user.get("first_name"),
+                        "timezone": user.get("timezone")
+                    }
+                    for user in eligible_users
+                ]
+            }
+        
+        # Process users in batches to avoid overwhelming the system
+        results = {
+            "processed": 0,
+            "sent": 0,
+            "skipped": 0,
+            "failed": 0,
+            "errors": [],
+            "users": []
+        }
+        
+        batch_size = 5  # Process 5 users at a time
+        total_batches = (len(eligible_users) + batch_size - 1) // batch_size
+        
+        logger.info(f"🚀 BULK SEND: Processing {len(eligible_users)} users in {total_batches} batches of {batch_size}")
+        
+        for batch_num in range(total_batches):
+            start_idx = batch_num * batch_size
+            end_idx = min(start_idx + batch_size, len(eligible_users))
+            batch = eligible_users[start_idx:end_idx]
+            
+            logger.info(f"🚀 BULK SEND: Processing batch {batch_num + 1}/{total_batches} ({len(batch)} users)")
+            
+            # Process each user in the batch
+            for user in batch:
+                try:
+                    user_id = user["id"]
+                    user_email = user["email"]
+                    user_name = user.get("first_name", "User")
+                    
+                    logger.info(f"🚀 BULK SEND: Processing user {user_id} ({user_email})")
+                    
+                    # Get user's recent insights
+                    insights = await repo.get_recent_insights(user_id, days=7) or []
+                    has_insights = len(insights) > 0
+                    
+                    # Get user profile data
+                    user_profile = await repo.get_user_profile_data(user_id)
+                    if not user_profile:
+                        user_profile = {
+                            "id": user_id,
+                            "first_name": user_name,
+                            "email": user_email
+                        }
+                    
+                    # Build email parameters
+                    params = await _build_params(user_profile, insights)
+                    
+                    # Send email via Brevo
+                    email_sender_instance = email_sender()
+                    template_params_wrapped = {"params": params}
+                    
+                    send_result = await email_sender_instance.send_brevo_digest(
+                        to_email=user_email,
+                        to_name=user_name,
+                        template_params=template_params_wrapped,
+                    )
+                    
+                    if send_result.get("success"):
+                        logger.info(f"✅ BULK SEND: Successfully sent to {user_email}")
+                        results["sent"] += 1
+                        
+                        # Log email event
+                        try:
+                            await repo.log_email_event(
+                                message_id=send_result["message_id"],
+                                event="sent",
+                                user_id=user_id,
+                                meta={
+                                    "email_type": "weekly_digest",
+                                    "to_email": user_email,
+                                    "template_id": send_result.get("template_id"),
+                                    "insights_count": len(insights),
+                                    "bulk_send": True
+                                }
+                            )
+                        except Exception as e:
+                            logger.error(f"⚠️ BULK SEND: Failed to log email event for {user_email}: {e}")
+                        
+                        results["users"].append({
+                            "id": user_id,
+                            "email": user_email,
+                            "status": "sent",
+                            "message_id": send_result.get("message_id"),
+                            "insights_count": len(insights)
+                        })
+                    else:
+                        logger.error(f"❌ BULK SEND: Failed to send to {user_email}: {send_result}")
+                        results["failed"] += 1
+                        results["errors"].append({
+                            "user_id": user_id,
+                            "email": user_email,
+                            "error": send_result.get("error", "Unknown error")
+                        })
+                        results["users"].append({
+                            "id": user_id,
+                            "email": user_email,
+                            "status": "failed",
+                            "error": send_result.get("error", "Unknown error")
+                        })
+                    
+                    results["processed"] += 1
+                    
+                    # Small delay between users to avoid rate limiting
+                    await asyncio.sleep(0.5)
+                    
+                except Exception as e:
+                    logger.error(f"❌ BULK SEND: Error processing user {user.get('id', 'unknown')}: {e}")
+                    results["failed"] += 1
+                    results["errors"].append({
+                        "user_id": user.get("id", "unknown"),
+                        "email": user.get("email", "unknown"),
+                        "error": str(e)
+                    })
+                    results["processed"] += 1
+            
+            # Delay between batches
+            if batch_num < total_batches - 1:
+                logger.info(f"🚀 BULK SEND: Waiting 2 seconds before next batch...")
+                await asyncio.sleep(2)
+        
+        logger.info(f"🚀 BULK SEND: Completed! Processed: {results['processed']}, Sent: {results['sent']}, Failed: {results['failed']}")
+        
+        return {
+            "success": True,
+            "message": f"Bulk digest send completed. Processed: {results['processed']}, Sent: {results['sent']}, Failed: {results['failed']}",
+            "processed": results["processed"],
+            "sent": results["sent"],
+            "skipped": results["skipped"],
+            "failed": results["failed"],
+            "errors": results["errors"],
+            "users": results["users"],
+            "timestamp": now_utc.isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ BULK SEND: Bulk digest send failed: {e}")
+        import traceback
+        logger.error(f"❌ BULK SEND: Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Bulk digest send failed: {str(e)}")
 
