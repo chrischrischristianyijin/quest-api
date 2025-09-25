@@ -193,17 +193,26 @@ class DigestRepo:
             Digest record or None
         """
         try:
+            logger.info(f"🔍 Checking for existing digest: user {user_id}, week {week_start}")
             response = self.supabase.table("email_digests").select("*").eq("user_id", user_id).eq("week_start", week_start.isoformat()).execute()
             
             if hasattr(response, 'error') and response.error:
-                logger.error(f"Error fetching digest for user {user_id}, week {week_start}: {response.error}")
+                logger.error(f"❌ Error fetching digest for user {user_id}, week {week_start}: {response.error}")
                 return None
             
             data = response.data or []
-            return data[0] if data else None
+            if data:
+                digest_info = data[0]
+                logger.info(f"✅ Found existing digest for user {user_id}, week {week_start}: ID={digest_info['id']}, status={digest_info['status']}, created={digest_info.get('created_at', 'unknown')}")
+                return digest_info
+            else:
+                logger.info(f"ℹ️ No existing digest found for user {user_id}, week {week_start}")
+                return None
             
         except Exception as e:
-            logger.error(f"Error fetching digest for user {user_id}, week {week_start}: {e}")
+            logger.error(f"❌ Error fetching digest for user {user_id}, week {week_start}: {e}")
+            import traceback
+            logger.error(f"❌ Traceback: {traceback.format_exc()}")
             return None
     
     async def create_digest_record(
@@ -224,6 +233,13 @@ class DigestRepo:
             Digest record ID
         """
         try:
+            # Check if record already exists before creating
+            existing = await self.get_digest_by_user_week(user_id, week_start)
+            if existing:
+                logger.warning(f"⚠️ Digest record already exists for user {user_id}, week {week_start} - returning existing ID: {existing['id']}")
+                return existing["id"]
+            
+            logger.info(f"📝 Creating new digest record for user {user_id}, week {week_start}, status {status}")
             response = self.supabase_service.table("email_digests").insert({
                 "user_id": user_id,
                 "week_start": week_start.isoformat(),
@@ -232,15 +248,23 @@ class DigestRepo:
             }).execute()
             
             if hasattr(response, 'error') and response.error:
-                logger.error(f"Error creating digest record: {response.error}")
+                logger.error(f"❌ Error creating digest record: {response.error}")
+                logger.error(f"❌ User ID: {user_id}, Week: {week_start}, Status: {status}")
                 raise Exception(f"Failed to create digest record: {response.error}")
             
+            if not response.data or len(response.data) == 0:
+                logger.error(f"❌ No data returned when creating digest record for user {user_id}")
+                raise Exception("No data returned when creating digest record")
+            
             digest_id = response.data[0]["id"]
-            logger.info(f"Created digest record {digest_id} for user {user_id}, week {week_start}")
+            logger.info(f"✅ Created digest record {digest_id} for user {user_id}, week {week_start}")
             return digest_id
             
         except Exception as e:
-            logger.error(f"Error creating digest record for user {user_id}: {e}")
+            logger.error(f"❌ Error creating digest record for user {user_id}, week {week_start}: {e}")
+            logger.error(f"❌ Error type: {type(e).__name__}")
+            import traceback
+            logger.error(f"❌ Traceback: {traceback.format_exc()}")
             raise
     
     async def update_digest(
