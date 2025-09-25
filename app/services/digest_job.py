@@ -168,9 +168,9 @@ class DigestJob:
             week_boundaries = get_week_boundaries(now_utc, timezone_str)
             week_start = week_boundaries["prev_week_start"].date()
             
-            # Check idempotency - has digest already been sent for this week?
+            # Check idempotency - has digest already been sent for this week? (skip in force mode)
             existing_digest = await self.repo.get_digest_by_user_week(user_id, week_start)
-            if existing_digest:
+            if existing_digest and not force_send:
                 if existing_digest["status"] == "sent":
                     logger.info(f"Digest already sent for user {user_id}, week {week_start} - skipping")
                     return {

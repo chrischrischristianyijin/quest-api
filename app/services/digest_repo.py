@@ -248,9 +248,21 @@ class DigestRepo:
             }).execute()
             
             if hasattr(response, 'error') and response.error:
-                logger.error(f"❌ Error creating digest record: {response.error}")
-                logger.error(f"❌ User ID: {user_id}, Week: {week_start}, Status: {status}")
-                raise Exception(f"Failed to create digest record: {response.error}")
+                # Handle unique constraint violation gracefully
+                if "duplicate key value violates unique constraint" in str(response.error) and "email_digests_user_id_week_start_key" in str(response.error):
+                    logger.warning(f"⚠️ Digest record already exists (race condition) for user {user_id}, week {week_start} - fetching existing record")
+                    # Fetch the existing record that was created by another process
+                    existing = await self.get_digest_by_user_week(user_id, week_start)
+                    if existing:
+                        logger.info(f"✅ Found existing digest record {existing['id']} for user {user_id}, week {week_start}")
+                        return existing["id"]
+                    else:
+                        logger.error(f"❌ Constraint violation but no existing record found for user {user_id}, week {week_start}")
+                        raise Exception(f"Unique constraint violation but no existing record found: {response.error}")
+                else:
+                    logger.error(f"❌ Error creating digest record: {response.error}")
+                    logger.error(f"❌ User ID: {user_id}, Week: {week_start}, Status: {status}")
+                    raise Exception(f"Failed to create digest record: {response.error}")
             
             if not response.data or len(response.data) == 0:
                 logger.error(f"❌ No data returned when creating digest record for user {user_id}")
