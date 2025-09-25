@@ -981,24 +981,65 @@ async def debug_ai_summary(user_id: str = Depends(get_current_user_id)):
 async def send_digest_to_all_users(
     force: bool = Query(True),
     dry_run: bool = Query(False),
+    confirmed: bool = Query(False),
     user_id: str = Depends(get_current_user_id)
 ):
     """
     Send digest emails to ALL eligible users immediately.
     
+    ⚠️  ADMIN-ONLY ENDPOINT ⚠️
     This bypasses timing restrictions and sends personalized emails to all users
     who have weekly_digest_enabled=True.
     
     Args:
         force: Always True (bypasses timing)
         dry_run: If True, builds emails but doesn't send them
+        confirmed: Must be True to actually send emails (safety measure)
         user_id: Current user ID (for authentication)
     
     Returns:
         Dict with results of the bulk send operation
     """
     try:
-        logger.info(f"🚀 BULK SEND: Starting bulk digest send for all users (dry_run={dry_run})")
+        # SECURITY CHECK 1: Require explicit confirmation
+        if not confirmed and not dry_run:
+            return {
+                "success": False,
+                "message": "⚠️ SAFETY CHECK: Add ?confirmed=true to confirm bulk email send",
+                "warning": "This will send emails to ALL users. Use dry_run=true to test first.",
+                "next_steps": [
+                    "1. Test with: ?dry_run=true to see what would be sent",
+                    "2. Confirm with: ?confirmed=true&dry_run=false to actually send"
+                ]
+            }
+        
+        # SECURITY CHECK 2: Get user profile to check for admin status
+        repo = DigestRepo()
+        user_profile = await repo.get_user_profile_data(user_id)
+        
+        # Check if user has admin privileges
+        is_admin = False
+        if user_profile:
+            # Option 1: Check for admin field in profile
+            is_admin = user_profile.get("is_admin", False)
+            
+            # Option 2: Check for specific email domains
+            user_email = user_profile.get("email", "")
+            if user_email:
+                admin_domains = ["@quest.com", "@yourcompany.com"]  # Add your admin domains
+                is_admin = any(user_email.endswith(domain) for domain in admin_domains)
+        
+        # SECURITY CHECK 3: Require admin access for non-dry-run
+        if not dry_run and not is_admin:
+            return {
+                "success": False,
+                "message": "❌ ACCESS DENIED: Admin privileges required for bulk email send",
+                "user_id": user_id,
+                "is_admin": is_admin,
+                "note": "Only admins can send bulk emails. Contact system administrator."
+            }
+        
+        logger.info(f"🚀 BULK SEND: Starting bulk digest send for all users (dry_run={dry_run}, admin={is_admin})")
         
         # Initialize services
         repo = DigestRepo()
