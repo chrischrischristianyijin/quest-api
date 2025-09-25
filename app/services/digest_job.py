@@ -157,6 +157,7 @@ class DigestJob:
         try:
             # Check if it's time to send (skip this check in force mode)
             if not force_send and not should_send_now(timezone_str, preferred_day, preferred_hour, now_utc):
+                logger.info(f"⏰ Skipping user {user_id} - not send time (timezone: {timezone_str}, day: {preferred_day}, hour: {preferred_hour})")
                 return {
                     "status": "skipped",
                     "reason": "not_send_time",
@@ -171,6 +172,7 @@ class DigestJob:
             existing_digest = await self.repo.get_digest_by_user_week(user_id, week_start)
             if existing_digest:
                 if existing_digest["status"] == "sent":
+                    logger.info(f"Digest already sent for user {user_id}, week {week_start} - skipping")
                     return {
                         "status": "skipped",
                         "reason": "already_sent",
@@ -182,6 +184,7 @@ class DigestJob:
                     logger.info(f"Retrying failed digest for user {user_id}")
                 else:
                     # Digest in progress, skip
+                    logger.info(f"Digest in progress for user {user_id}, week {week_start} - skipping")
                     return {
                         "status": "skipped",
                         "reason": "in_progress",
@@ -195,11 +198,13 @@ class DigestJob:
             )
             
             # Generate content
+            logger.info(f"📝 Generating digest content for user {user_id}, week {week_start}")
             content_result = await self._generate_digest_content(
                 user, week_boundaries, no_activity_policy
             )
             
             if not content_result["success"]:
+                logger.error(f"❌ Content generation failed for user {user_id}: {content_result['error']}")
                 await self.repo.update_digest(
                     digest_id, "failed", error=content_result["error"]
                 )
@@ -209,6 +214,8 @@ class DigestJob:
                     "user_id": user_id,
                     "error": content_result["error"]
                 }
+            
+            logger.info(f"✅ Content generated successfully for user {user_id}")
             
             # Check if we should skip sending (no activity policy)
             if content_result.get("skip_sending", False):
@@ -258,11 +265,13 @@ class DigestJob:
                 }
             
             # Send actual email
+            logger.info(f"📧 Sending digest email to user {user_id} ({user.get('email', 'unknown')})")
             send_result = await self._send_digest_email(
                 user, render_result, content_result["payload"]
             )
             
             if send_result["success"]:
+                logger.info(f"✅ Email sent successfully to user {user_id}, message_id: {send_result['message_id']}")
                 await self.repo.update_digest(
                     digest_id, "sent",
                     message_id=send_result["message_id"],
@@ -276,6 +285,7 @@ class DigestJob:
                     "message_id": send_result["message_id"]
                 }
             else:
+                logger.error(f"❌ Email send failed for user {user_id}: {send_result['error']}")
                 await self.repo.update_digest(
                     digest_id, "failed", error=send_result["error"]
                 )
@@ -287,12 +297,24 @@ class DigestJob:
                 }
                 
         except Exception as e:
-            logger.error(f"Error processing user {user_id}: {e}")
+            import traceback
+            error_details = {
+                "error": str(e),
+                "error_type": type(e).__name__,
+                "traceback": traceback.format_exc(),
+                "user_id": user_id,
+                "email": user.get("email", "unknown"),
+                "timezone": timezone_str,
+                "preferred_day": preferred_day,
+                "preferred_hour": preferred_hour
+            }
+            logger.error(f"❌ Error processing user {user_id}: {error_details}")
             return {
                 "status": "failed",
                 "reason": "unexpected_error",
                 "user_id": user_id,
-                "error": str(e)
+                "error": str(e),
+                "error_details": error_details
             }
     
     async def _create_or_update_digest_record(
@@ -303,13 +325,20 @@ class DigestJob:
         existing_digest: Optional[Dict[str, Any]] = None
     ) -> str:
         """Create or update digest record."""
-        if existing_digest:
-            await self.repo.update_digest(
-                existing_digest["id"], status
-            )
-            return existing_digest["id"]
-        else:
-            return await self.repo.create_digest_record(user_id, week_start, status)
+        try:
+            if existing_digest:
+                logger.info(f"📝 Updating existing digest record {existing_digest['id']} for user {user_id}, week {week_start} to status {status}")
+                await self.repo.update_digest(
+                    existing_digest["id"], status
+                )
+                return existing_digest["id"]
+            else:
+                logger.info(f"📝 Creating new digest record for user {user_id}, week {week_start} with status {status}")
+                return await self.repo.create_digest_record(user_id, week_start, status)
+        except Exception as e:
+            logger.error(f"❌ Error in _create_or_update_digest_record for user {user_id}, week {week_start}: {e}")
+            logger.error(f"❌ Existing digest: {existing_digest}")
+            raise
     
     async def _generate_digest_content(
         self, 
@@ -365,7 +394,8 @@ class DigestJob:
             
             # Generate subject
             if activity_summary["total_activity"] > 0:
-                subject = f"Your Weekly Quest Digest - {activity_summary['total_insights']} new insights"
+                total_insights = activity_summary.get("total_insights", 0)
+                subject = f"Your Weekly Quest Digest - {total_insights} new insights"
             else:
                 subject = "Your Weekly Quest Digest"
             
@@ -425,7 +455,7 @@ class DigestJob:
             
             <div class="stats">
                 <h3>This Week's Activity</h3>
-                <p>📝 {activity_summary['total_insights']} insights • 📚 {activity_summary['total_stacks']} stacks</p>
+                <p>📝 {activity_summary.get('total_insights', 0)} insights • 📚 {activity_summary.get('total_stacks', 0)} stacks</p>
             </div>
         """
         
