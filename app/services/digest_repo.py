@@ -638,7 +638,8 @@ class DigestRepo:
                 bio,
                 created_at,
                 updated_at,
-                memory_profile
+                memory_profile,
+                is_admin
                 """
             ).eq("id", user_id).execute()
             
