@@ -70,6 +70,12 @@ class DigestContentGenerator:
             stacks_section = self._create_stacks_section(stacks)
             suggestions = self._create_suggestions_section(insights, stacks)
             
+            # Generate AI summary (will be populated by digest_job.py)
+            ai_summary = ""
+            
+            # Generate insights organized by tags for "本周收藏" section
+            insights_by_tags = self._create_insights_by_tags_section(insights)
+            
             # Build final payload
             payload = {
                 "user": {
@@ -83,8 +89,10 @@ class DigestContentGenerator:
                     "highlights": highlights.to_dict(),
                     "more_content": more_content.to_dict(),
                     "stacks": stacks_section.to_dict(),
-                    "suggestions": suggestions.to_dict()
+                    "suggestions": suggestions.to_dict(),
+                    "tags": insights_by_tags  # For "本周收藏" section
                 },
+                "ai_summary": ai_summary,  # For "AI总结" section
                 "metadata": {
                     "generated_at": now_utc().isoformat(),
                     "week_start": activity_analysis.get("week_start"),
@@ -532,4 +540,49 @@ class DigestContentGenerator:
         week_start = now - timedelta(days=now.weekday())
         week_end = week_start + timedelta(days=6)
         return week_end.date().isoformat()
+    
+    def _create_insights_by_tags_section(self, insights: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Create insights organized by tags for the "本周收藏" section.
+        
+        Args:
+            insights: List of insight objects
+            
+        Returns:
+            List of tag objects with associated insights
+        """
+        try:
+            if not insights:
+                return []
+            
+            # Group insights by tags
+            tags_dict = {}
+            for insight in insights:
+                insight_tags = insight.get("tags", []) or []
+                insight_title = insight.get("title", "Untitled").strip()
+                
+                if not insight_tags:
+                    # Handle untagged insights
+                    tags_dict.setdefault("Untagged", []).append(insight_title)
+                else:
+                    for tag in insight_tags:
+                        tag_name = tag if isinstance(tag, str) else tag.get("name", "Untagged")
+                        tags_dict.setdefault(tag_name, []).append(insight_title)
+            
+            # Convert to list format expected by Brevo template
+            result = []
+            for tag_name, titles in tags_dict.items():
+                # Limit to first 6 titles and join with commas
+                article_list = ", ".join(titles[:6])
+                result.append({
+                    "name": tag_name,
+                    "articles": article_list
+                })
+            
+            logger.info(f"Created insights by tags section: {len(result)} tags")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error creating insights by tags section: {e}")
+            return []
 

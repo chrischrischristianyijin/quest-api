@@ -360,6 +360,18 @@ class DigestJob:
                 user, insights, stacks, no_activity_policy
             )
             
+            # Generate AI summary if insights are available
+            if insights and len(insights) > 0:
+                try:
+                    ai_summary = await self.repo.get_ai_summary(insights, user_id)
+                    payload["ai_summary"] = ai_summary
+                    logger.info(f"Generated AI summary for user {user_id}: {len(ai_summary)} characters")
+                except Exception as e:
+                    logger.error(f"Error generating AI summary for user {user_id}: {e}")
+                    payload["ai_summary"] = "AI summary temporarily unavailable."
+            else:
+                payload["ai_summary"] = "No insights available for AI summary this week."
+            
             # Check if we should skip sending
             skip_sending = (
                 payload.get("metadata", {}).get("skipped", False) or
