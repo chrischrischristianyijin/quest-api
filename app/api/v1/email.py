@@ -271,6 +271,7 @@ async def get_email_preferences(
                 logger.error(f"🔐 EMAIL API: ❌ Failed to create default preferences for user: {user_id}")
                 # Fall back to returning default preferences without database storage
                 default_preferences = {
+                    "user_id": user_id,  # Include user_id
                     "weekly_digest_enabled": False,  # Start with disabled by default
                     "preferred_day": 6,  # Saturday
                     "preferred_hour": 20,  # 8 PM
@@ -296,6 +297,7 @@ async def get_email_preferences(
         result = {
             "success": True,
             "preferences": {
+                "user_id": preferences.get("user_id", user_id),  # Include user_id
                 "weekly_digest_enabled": preferences["weekly_digest_enabled"],
                 "preferred_day": preferences["preferred_day"],
                 "preferred_hour": preferences["preferred_hour"],
