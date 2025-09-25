@@ -2,10 +2,11 @@
 Content generation for weekly digest emails.
 Handles user activity analysis, content curation, and template data preparation.
 """
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any, Tuple, Optional
 import logging
 import json
+from ..utils.timezone_utils import to_utc, now_utc
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +86,7 @@ class DigestContentGenerator:
                     "suggestions": suggestions.to_dict()
                 },
                 "metadata": {
-                    "generated_at": datetime.utcnow().isoformat(),
+                    "generated_at": now_utc().isoformat(),
                     "week_start": activity_analysis.get("week_start"),
                     "week_end": activity_analysis.get("week_end"),
                     "total_insights": len(insights),
@@ -110,19 +111,14 @@ class DigestContentGenerator:
         text_insights = [i for i in insights if not i.get("url")]
         
         # Get recent activity (last 3 days)
-        from datetime import timezone
-        recent_cutoff = datetime.now(timezone.utc) - timedelta(days=3)
+        recent_cutoff = now_utc() - timedelta(days=3)
         recent_insights = []
         for i in insights:
-            parsed_dt = self._parse_datetime(i.get("created_at", ""))
-            if parsed_dt:
-                # Ensure both datetimes are timezone-aware for comparison
-                if parsed_dt.tzinfo is None:
-                    # Assume UTC if no timezone info
-                    parsed_dt = parsed_dt.replace(tzinfo=timezone.utc)
-                
-                if parsed_dt > recent_cutoff:
-                    recent_insights.append(i)
+            created_utc = to_utc(i.get("created_at"))
+            updated_utc = to_utc(i.get("updated_at"))
+            dt = created_utc or updated_utc
+            if dt and dt > recent_cutoff:
+                recent_insights.append(i)
         
         # Calculate engagement metrics
         insights_with_summaries = [i for i in insights if self._has_summary(i)]
@@ -279,7 +275,19 @@ class DigestContentGenerator:
                     "email": user.get("email"),
                     "timezone": user.get("timezone", "America/Los_Angeles")
                 },
-                "activity_summary": {"total_activity": 0},
+                "activity_summary": {
+                    "total_activity": 0,
+                    "total_insights": 0,
+                    "total_stacks": 0,
+                    "url_insights": 0,
+                    "text_insights": 0,
+                    "recent_insights": 0,
+                    "insights_with_summaries": 0,
+                    "insights_with_tags": 0,
+                    "engagement_score": 0.0,
+                    "week_start": self._get_week_start(),
+                    "week_end": self._get_week_end(),
+                },
                 "sections": {
                     "highlights": DigestSection("This Week's Highlights", [], "empty").to_dict(),
                     "more_content": DigestSection("More from This Week", [], "empty").to_dict(),
@@ -287,7 +295,7 @@ class DigestContentGenerator:
                     "suggestions": DigestSection("Suggestions for You", [], "empty").to_dict()
                 },
                 "metadata": {
-                    "generated_at": datetime.utcnow().isoformat(),
+                    "generated_at": now_utc().isoformat(),
                     "skipped": True,
                     "reason": "no_activity"
                 }
@@ -301,7 +309,19 @@ class DigestContentGenerator:
                     "email": user.get("email"),
                     "timezone": user.get("timezone", "America/Los_Angeles")
                 },
-                "activity_summary": {"total_activity": 0},
+                "activity_summary": {
+                    "total_activity": 0,
+                    "total_insights": 0,
+                    "total_stacks": 0,
+                    "url_insights": 0,
+                    "text_insights": 0,
+                    "recent_insights": 0,
+                    "insights_with_summaries": 0,
+                    "insights_with_tags": 0,
+                    "engagement_score": 0.0,
+                    "week_start": self._get_week_start(),
+                    "week_end": self._get_week_end(),
+                },
                 "sections": {
                     "highlights": DigestSection("This Week's Highlights", [], "empty").to_dict(),
                     "more_content": DigestSection("More from This Week", [], "empty").to_dict(),
@@ -317,7 +337,7 @@ class DigestContentGenerator:
                     ], "suggestions").to_dict()
                 },
                 "metadata": {
-                    "generated_at": datetime.utcnow().isoformat(),
+                    "generated_at": now_utc().isoformat(),
                     "brief_mode": True,
                     "reason": "no_activity_brief"
                 }
@@ -331,7 +351,19 @@ class DigestContentGenerator:
                     "email": user.get("email"),
                     "timezone": user.get("timezone", "America/Los_Angeles")
                 },
-                "activity_summary": {"total_activity": 0},
+                "activity_summary": {
+                    "total_activity": 0,
+                    "total_insights": 0,
+                    "total_stacks": 0,
+                    "url_insights": 0,
+                    "text_insights": 0,
+                    "recent_insights": 0,
+                    "insights_with_summaries": 0,
+                    "insights_with_tags": 0,
+                    "engagement_score": 0.0,
+                    "week_start": self._get_week_start(),
+                    "week_end": self._get_week_end(),
+                },
                 "sections": {
                     "highlights": DigestSection("This Week's Highlights", [], "empty").to_dict(),
                     "more_content": DigestSection("More from This Week", [], "empty").to_dict(),
@@ -361,7 +393,7 @@ class DigestContentGenerator:
                     ], "suggestions").to_dict()
                 },
                 "metadata": {
-                    "generated_at": datetime.utcnow().isoformat(),
+                    "generated_at": now_utc().isoformat(),
                     "suggestions_mode": True,
                     "reason": "no_activity_suggestions"
                 }
@@ -384,7 +416,7 @@ class DigestContentGenerator:
                 "suggestions": DigestSection("Suggestions for You", [], "empty").to_dict()
             },
             "metadata": {
-                "generated_at": datetime.utcnow().isoformat(),
+                "generated_at": now_utc().isoformat(),
                 "error": True,
                 "reason": "content_generation_failed"
             }
@@ -399,7 +431,7 @@ class DigestContentGenerator:
             scored.append(insight)
         
         # Sort by score (descending) then by recency
-        scored.sort(key=lambda x: (x["_engagement_score"], self._parse_datetime(x.get("created_at", ""))), reverse=True)
+        scored.sort(key=lambda x: (x["_engagement_score"], to_utc(x.get("created_at")) or datetime.min.replace(tzinfo=timezone.utc)), reverse=True)
         return scored
     
     def _calculate_engagement_score(self, insights: List[Dict[str, Any]], stacks: List[Dict[str, Any]]) -> float:
@@ -428,9 +460,9 @@ class DigestContentGenerator:
                 score += 1.0
             
             # Recency bonus
-            created_at = self._parse_datetime(insight.get("created_at", ""))
-            if created_at:
-                days_old = (datetime.utcnow() - created_at).days
+            created_utc = to_utc(insight.get("created_at"))
+            if created_utc:
+                days_old = (now_utc() - created_utc).days
                 if days_old < 1:
                     score += 3.0
                 elif days_old < 3:
@@ -475,32 +507,28 @@ class DigestContentGenerator:
         return insight.get("title", "No summary available")
     
     def _parse_datetime(self, dt_str: str) -> Optional[datetime]:
-        """Parse datetime string to datetime object."""
+        """Parse datetime string to timezone-aware datetime object."""
         if not dt_str:
             return None
         
         try:
-            # Handle ISO format with timezone
             if dt_str.endswith('Z'):
-                return datetime.fromisoformat(dt_str.replace('Z', '+00:00'))
-            elif '+' in dt_str or dt_str.endswith('00:00'):
-                return datetime.fromisoformat(dt_str)
-            else:
-                # Assume UTC if no timezone info
-                return datetime.fromisoformat(dt_str).replace(tzinfo=None)
+                return datetime.fromisoformat(dt_str.replace('Z', '+00:00')).astimezone(timezone.utc)
+            dt = datetime.fromisoformat(dt_str)
+            return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc)
         except Exception as e:
             logger.warning(f"Failed to parse datetime '{dt_str}': {e}")
             return None
     
     def _get_week_start(self) -> str:
         """Get current week start as ISO string."""
-        now = datetime.utcnow()
+        now = now_utc()
         week_start = now - timedelta(days=now.weekday())
         return week_start.date().isoformat()
     
     def _get_week_end(self) -> str:
         """Get current week end as ISO string."""
-        now = datetime.utcnow()
+        now = now_utc()
         week_start = now - timedelta(days=now.weekday())
         week_end = week_start + timedelta(days=6)
         return week_end.date().isoformat()

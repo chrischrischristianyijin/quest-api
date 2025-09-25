@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional, Tuple
 from supabase import create_client, Client
 import os
+from ..utils.timezone_utils import now_utc
 
 logger = logging.getLogger(__name__)
 
@@ -280,7 +281,7 @@ class DigestRepo:
         try:
             update_data = {
                 "status": status,
-                "updated_at": datetime.utcnow().isoformat()
+                "updated_at": now_utc().isoformat()
             }
             
             if message_id is not None:
@@ -555,7 +556,7 @@ class DigestRepo:
             event_data = {
                 "message_id": message_id,
                 "event": event,
-                "occurred_at": datetime.utcnow().isoformat()
+                "occurred_at": now_utc().isoformat()
             }
             
             if user_id:
@@ -591,8 +592,8 @@ class DigestRepo:
             Statistics dictionary
         """
         try:
-            from datetime import timedelta
-            cutoff_date = (datetime.utcnow() - timedelta(days=days)).isoformat()
+            from datetime import timedelta, timezone
+            cutoff_date = (now_utc() - timedelta(days=days)).isoformat()
             
             # Get email events for the period
             response = self.supabase_service.table("email_events").select("*").gte("occurred_at", cutoff_date).execute()
