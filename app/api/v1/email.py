@@ -404,7 +404,8 @@ async def digest_preview_post(payload: dict, user_id: str = Depends(get_current_
 @router.get("/digest/preview")
 async def digest_preview_get(
     user_id: str = Depends(get_current_user_id),
-    target_user_id: Optional[str] = Query(None, description="User ID to preview for (admin only)")
+    target_user_id: Optional[str] = Query(None, description="User ID to preview for (admin only)"),
+    uid: Optional[str] = Query(None, description="Alias for target_user_id")
 ):
     """
     Returns JSON with html field for preview (used by the modal GET path).
@@ -413,29 +414,23 @@ async def digest_preview_get(
     Args:
         user_id: Current authenticated user ID
         target_user_id: Optional user ID to preview for (admin only)
+        uid: Alias for target_user_id (convenience parameter)
     """
     try:
-        # Determine which user to preview for
-        preview_user_id = target_user_id if target_user_id else user_id
+        # Support both parameter names for convenience
+        requested_target = target_user_id or uid
+        preview_user_id = requested_target or user_id
         
-        # Security check: if target_user_id is provided, verify admin access
-        if target_user_id and target_user_id != user_id:
-            # Check if current user is admin
-            repo = DigestRepo()
-            current_user_profile = await repo.get_user_profile_data(user_id)
-            is_admin = current_user_profile.get("is_admin", False) if current_user_profile else False
-            
-            if not is_admin:
-                return JSONResponse({"ok": False, "error": "Admin access required to preview other users"}, status_code=403)
-        
-        # Get user profile data for the target user
         repo = DigestRepo()
-        user_profile = await repo.get_user_profile_data(preview_user_id)
-        if not user_profile:
-            # Return safe fallback instead of 404
-            user_profile = {"id": preview_user_id, "first_name": "User"}
         
-        # Get recent insights for the target user (tolerate empty insight sets)
+        # Admin check only when previewing someone else
+        if requested_target and requested_target != user_id:
+            me = await repo.get_user_profile_data(user_id)
+            if not (me and me.get("is_admin", False)):
+                return JSONResponse({"ok": False, "error": "Admin access required"}, status_code=403)
+        
+        # 🔒 Always use preview_user_id below (never session user)
+        user_profile = await repo.get_user_profile_data(preview_user_id) or {"id": preview_user_id, "first_name": "User"}
         insights = await repo.get_recent_insights(preview_user_id, days=7) or []
         
         # Build parameters using safe methods
@@ -443,6 +438,18 @@ async def digest_preview_get(
         
         # Generate simple HTML preview without template parsing
         html = _preview_html(params)
+        
+        # Helpful diagnostics
+        import hashlib, json
+        params_hash = hashlib.sha256(json.dumps(params, sort_keys=True).encode()).hexdigest()
+        logger.info({
+            "event": "digest_preview",
+            "auth_user": user_id,
+            "preview_user": preview_user_id,
+            "insights_count": len(insights),
+            "unsubscribe_url": params.get("unsubscribe_url"),
+            "params_hash": params_hash
+        })
         
         return JSONResponse({"ok": True, "html": html, "params": params}, status_code=200)
 
@@ -717,20 +724,39 @@ async def test_send_digest(
             no_activity_policy=prefs_raw.get("no_activity_policy", "skip"),
         )
 
-        # Get recent insights - if email_override is provided, we need to find the target user
+        # Resolve target user - if email_override is provided, find the user by email
         target_user_id = user_id
         if email_override:
-            # Find user by email (extract from email_override)
-            # For now, we'll use the current user's insights, but this should be improved
-            # to find the actual user by email
-            target_user_id = user_id
+            try:
+                # Find user by email in auth.users table
+                auth_response = repo.supabase_service.schema("auth").table("users").select("id,email").eq("email", email_override).limit(1).execute()
+                
+                if not auth_response.data:
+                    return JSONResponse({
+                        "ok": False, 
+                        "error": f"No user found for email: {email_override}",
+                        "decision": False,
+                        "will_send": False
+                    }, status_code=400)
+                
+                target_user_id = auth_response.data[0]["id"]
+                logger.info(f"📧 EMAIL DIGEST DEBUG: Resolved email_override {email_override} to user_id {target_user_id}")
+                
+            except Exception as e:
+                logger.error(f"📧 EMAIL DIGEST DEBUG: Failed to resolve email_override {email_override}: {e}")
+                return JSONResponse({
+                    "ok": False, 
+                    "error": f"Failed to resolve email: {email_override}",
+                    "decision": False,
+                    "will_send": False
+                }, status_code=400)
         
         insights = await repo.get_recent_insights(target_user_id, days=7) or []
         has_insights = len(insights) > 0
         
         # Debug logging
-        logger.info(f"📧 EMAIL DIGEST DEBUG: user_id={user_id}, insights_count={len(insights)}, has_insights={has_insights}")
-        logger.info(f"📧 EMAIL DIGEST DEBUG: force={force}, dry_run={dry_run}")
+        logger.info(f"📧 EMAIL DIGEST DEBUG: auth_user_id={user_id}, target_user_id={target_user_id}, insights_count={len(insights)}, has_insights={has_insights}")
+        logger.info(f"📧 EMAIL DIGEST DEBUG: force={force}, dry_run={dry_run}, email_override={email_override}")
         if insights:
             logger.info(f"📧 EMAIL DIGEST DEBUG: Sample insight: {insights[0]}")
 
@@ -759,10 +785,10 @@ async def test_send_digest(
         if not will_send:
             return JSONResponse({"ok": True, **result, "note": "Skipped by schedule/no_activity policy."}, 200)
 
-        # Build template params
-        user_profile = await repo.get_user_profile_data(user_id)
+        # Build template params using target user's data
+        user_profile = await repo.get_user_profile_data(target_user_id)
         if not user_profile:
-            user_profile = {"id": user_id, "first_name": "User"}
+            user_profile = {"id": target_user_id, "first_name": "User"}
         
         params = await _build_params(user_profile, insights)
         result["params_sample"] = {k: (v if k != "tags" else v[:2]) for k, v in params.items()}
