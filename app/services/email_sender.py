@@ -807,5 +807,6 @@ def get_email_sender():
         _email_sender_instance = EmailSender()
     return _email_sender_instance
 
-# For backward compatibility
-email_sender = get_email_sender
+# For backward compatibility - return the function, not assign it
+def email_sender():
+    return get_email_sender()
