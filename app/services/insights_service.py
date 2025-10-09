@@ -504,45 +504,71 @@ class InsightsService:
     
     @staticmethod
     async def get_insight(insight_id: UUID, user_id: UUID) -> Dict[str, Any]:
-        """获取单个insight详情"""
+        """获取单个insight详情（包含insight_contents）"""
         try:
             supabase = get_supabase()
-            
-            # 获取insight
+
+            # 获取insight基础数据
             response = supabase.table('insights').select('*').eq('id', str(insight_id)).execute()
-            
+
             if hasattr(response, 'error') and response.error:
                 logger.error(f"获取insight失败: {response.error}")
                 return {"success": False, "message": "获取insight失败"}
-            
+
             if not response.data:
                 return {"success": False, "message": "Insight不存在"}
-            
+
             insight = response.data[0]
-            
+
             # 权限检查：只能查看自己的insight
             if insight['user_id'] != str(user_id):
                 return {"success": False, "message": "无权查看此insight"}
-            
+
+            # 单独查询insight_contents（使用与get_insights相同的方法）
+            try:
+                contents_response = supabase.table('insight_contents').select(
+                    'insight_id, summary, thought'
+                ).eq('insight_id', str(insight_id)).execute()
+
+                insight_contents = []
+                if contents_response.data:
+                    # 转换为数组格式
+                    for content in contents_response.data:
+                        insight_contents.append({
+                            'summary': content.get('summary'),
+                            'thought': content.get('thought')
+                        })
+                    logger.info(f"✅ 成功获取insight_contents: insight_id={insight_id}, 数量={len(insight_contents)}")
+                else:
+                    logger.info(f"⚠️ 未找到insight_contents: insight_id={insight_id}")
+
+            except Exception as e:
+                logger.error(f"获取insight_contents时出错: {e}")
+                insight_contents = []
+
             # 获取标签
             tags_result = await InsightTagService.get_insight_tags(insight_id, user_id)
             insight_tags = tags_result.get('data', []) if tags_result.get('success') else []
-            
-            # 构建响应数据
-            insight_response = InsightResponse(
-                id=UUID(insight['id']),
-                user_id=UUID(insight['user_id']),
-                title=insight['title'],
-                description=insight['description'],
-                url=insight.get('url'),
-                image_url=insight.get('image_url'),
-                meta=insight.get('meta'),
-                created_at=insight['created_at'],
-                updated_at=insight['updated_at'],
-                tags=insight_tags
-            )
-            
-            return {"success": True, "data": insight_response}
+
+            logger.info(f"📝 get_insight返回数据: id={insight['id']}, insight_contents数量={len(insight_contents)}")
+
+            # 构建响应数据（包含insight_contents）
+            return {
+                "success": True,
+                "data": {
+                    "id": insight['id'],
+                    "user_id": insight['user_id'],
+                    "title": insight['title'],
+                    "description": insight['description'],
+                    "url": insight.get('url'),
+                    "image_url": insight.get('image_url'),
+                    "meta": insight.get('meta'),
+                    "created_at": insight['created_at'],
+                    "updated_at": insight['updated_at'],
+                    "tags": insight_tags,
+                    "insight_contents": insight_contents  # 包含AI摘要
+                }
+            }
             
         except Exception as e:
             logger.error(f"获取insight失败: {str(e)}")
@@ -607,20 +633,17 @@ class InsightsService:
             logger.info(f"🔍 DEBUG: 创建的insight stack_id: {insight.get('stack_id')} (type: {type(insight.get('stack_id'))})")
             insight_id = UUID(insight['id'])
 
-            # 启动异步后台任务处理内容抓取和摘要生成
+            # 异步后台执行内容抓取和摘要生成，立即返回响应
             if os.getenv('FETCH_PAGE_CONTENT_ENABLED', '').lower() in ('1', 'true', 'yes'):
-                try:
-                    import asyncio
-                    # 创建后台任务，不等待完成
-                    asyncio.create_task(InsightsService._fetch_and_save_content(
-                        insight_id=insight_id,
-                        user_id=user_id,
-                        url=insight_data.url,
-                        thought=insight_data.thought  # 传递thought字段到后台任务
-                    ))
-                    logger.info("已启动异步内容处理 pipeline 后台任务")
-                except Exception as task_err:
-                    logger.warning(f"启动异步内容处理任务失败: {task_err}")
+                # 在后台异步执行，不阻塞响应
+                import asyncio
+                asyncio.create_task(InsightsService._fetch_and_save_content(
+                    insight_id=insight_id,
+                    user_id=user_id,
+                    url=insight_data.url,
+                    thought=insight_data.thought  # 传递thought字段
+                ))
+                logger.info("已启动异步内容处理 pipeline 后台任务")
             else:
                 logger.info("FETCH_PAGE_CONTENT_ENABLED 未开启，跳过全文抓取与保存")
             
@@ -632,11 +655,12 @@ class InsightsService:
                 if not tags_result.get('success'):
                     logger.warning(f"创建insight成功，但标签处理失败: {tags_result.get('message')}")
             
-            # 获取完整的insight数据（包含标签）
+            # 获取完整的insight数据（包含标签和insight_contents）
             # 使用 service role 来避免 RLS 权限问题
             try:
-                response = supabase_service.table('insights').select('*').eq('id', str(insight_id)).execute()
-                
+                # 查询insight及其关联的insight_contents（包含AI摘要）
+                response = supabase_service.table('insights').select('*, insight_contents(*)').eq('id', str(insight_id)).execute()
+
                 if not response.data:
                     logger.warning(f"刚创建的insight {insight_id} 无法立即查询到，可能是数据库延迟")
                     # 返回基础创建成功信息
@@ -651,17 +675,18 @@ class InsightsService:
                             "url": insight_data.url,
                             "image_url": insight_data.image_url,
                             "stack_id": insight_data.stack_id,
-                            "tags": []
+                            "tags": [],
+                            "insight_contents": []
                         }
                     }
-                
+
                 insight_detail = response.data[0]
-                
+
                 # 获取标签
                 tags_result = await InsightTagService.get_insight_tags(insight_id, user_id)
                 insight_tags = tags_result.get('data', []) if tags_result.get('success') else []
-                
-                # 构建响应数据
+
+                # 构建响应数据（包含insight_contents）
                 return {
                     "success": True,
                     "message": "Insight创建成功",
@@ -676,7 +701,8 @@ class InsightsService:
                         "meta": insight_detail.get('meta'),
                         "created_at": insight_detail['created_at'],
                         "updated_at": insight_detail['updated_at'],
-                        "tags": insight_tags
+                        "tags": insight_tags,
+                        "insight_contents": insight_detail.get('insight_contents', [])
                     }
                 }
                 
