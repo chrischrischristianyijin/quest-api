@@ -286,25 +286,32 @@ class DigestRepo:
         Returns:
             Digest record ID
         """
+        # First check if a record already exists
+        existing = await self.get_digest_by_user_week(user_id, week_start)
+        if existing:
+            logger.info(f"📝 Digest record already exists for user {user_id}, week {week_start}: {existing['id']}")
+            return existing["id"]
+        
+        # Create new record
         payload = {
             "user_id": user_id,
             "week_start": week_start.isoformat(),
             "status": status,
             "retry_count": 0
         }
+        
         resp = self.supabase_service.table("email_digests") \
-            .upsert(payload, on_conflict=["user_id", "week_start"]) \
+            .insert(payload) \
             .execute()
+        
         if hasattr(resp, "error") and resp.error:
-            raise Exception(f"Failed to upsert digest record: {resp.error}")
+            raise Exception(f"Failed to create digest record: {resp.error}")
+        
         if resp.data and len(resp.data) > 0:
-            logger.info(f"✅ Upserted digest record {resp.data[0]['id']} for user {user_id}, week {week_start}")
+            logger.info(f"✅ Created digest record {resp.data[0]['id']} for user {user_id}, week {week_start}")
             return resp.data[0]["id"]
-        existing = await self.get_digest_by_user_week(user_id, week_start)
-        if not existing:
-            raise Exception("Upsert succeeded but could not fetch digest record")
-        logger.info(f"✅ Found existing digest record {existing['id']} for user {user_id}, week {week_start}")
-        return existing["id"]
+        
+        raise Exception("Failed to create digest record - no data returned")
     
     async def update_digest(
         self, 

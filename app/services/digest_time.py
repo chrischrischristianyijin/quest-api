@@ -31,7 +31,7 @@ def should_send_now(user_tz: str, preferred_day: int, preferred_hour: int, now_u
     
     Args:
         user_tz: User's timezone (e.g., 'America/Los_Angeles')
-        preferred_day: User's preferred day (0=Sunday, 1=Monday, etc.)
+        preferred_day: User's preferred day (1=Monday, 2=Tuesday, ..., 6=Saturday, 7=Sunday) - ISO weekday
         preferred_hour: User's preferred hour (0-23)
         now_utc: Current UTC time
     
@@ -42,8 +42,14 @@ def should_send_now(user_tz: str, preferred_day: int, preferred_hour: int, now_u
         tz = pytz.timezone(user_tz)
         now_local = now_utc.astimezone(tz)
         
+        # Convert Python weekday (Monday=0) to ISO weekday (Monday=1)
+        # Python weekday: Monday=0, Tuesday=1, Wednesday=2, Thursday=3, Friday=4, Saturday=5, Sunday=6
+        # ISO weekday: Monday=1, Tuesday=2, Wednesday=3, Thursday=4, Friday=5, Saturday=6, Sunday=7
+        python_weekday = now_local.weekday()
+        iso_weekday = python_weekday + 1
+        
         # Check if it's the right day and hour
-        is_right_day = now_local.weekday() == preferred_day
+        is_right_day = iso_weekday == preferred_day
         is_right_hour = now_local.hour == preferred_hour
         
         # Only send if it's exactly the right time (not past it)
