@@ -61,30 +61,32 @@ class DigestRepo:
                     logger.warning(f"⚠️ DIGEST REPO: No user_id found in preference: {pref}")
                     continue
                 
-                # Get user email from profiles table (extract from username)
-                # This is simpler and more reliable than accessing auth.users
+                # Get user email using Supabase Admin API
                 user_email = None
-                
-                # Get user profile data and extract email from username
+
                 try:
+                    # Get user profile data
                     profile_response = self.supabase_service.table("profiles").select(
                         "id, nickname, username, avatar_url, bio, created_at, updated_at"
                     ).eq("id", user_id).execute()
-                    
+
                     profile_data = profile_response.data[0] if profile_response.data else {}
-                    
-                    # Extract email from username (first half before _) + @gmail.com
-                    if profile_data and profile_data.get("username"):
-                        username = profile_data["username"]
-                        email_prefix = username.split("_")[0]
-                        user_email = f"{email_prefix}@gmail.com"
-                        logger.info(f"✅ Extracted email for user {user_id}: {user_email} (from username: {username})")
-                    else:
-                        logger.warning(f"No username found for user {user_id} in profiles")
+
+                    # Get email from Supabase Admin API (auth.admin.get_user_by_id)
+                    try:
+                        user_auth = self.supabase_service.auth.admin.get_user_by_id(user_id)
+                        if user_auth and hasattr(user_auth, 'user') and user_auth.user:
+                            user_email = user_auth.user.email
+                            logger.info(f"✅ Got email for user {user_id}: {user_email}")
+                        else:
+                            logger.warning(f"No email found for user {user_id}")
+                            continue
+                    except Exception as auth_error:
+                        logger.warning(f"Could not get user from auth admin API: {auth_error}")
                         continue
-                        
+
                 except Exception as e:
-                    logger.warning(f"Could not fetch profile for user {user_id}: {e}")
+                    logger.warning(f"Could not fetch email for user {user_id}: {e}")
                     continue
                 
                 users.append({

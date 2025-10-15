@@ -56,6 +56,9 @@ class Settings(BaseSettings):
     BREVO_TEMPLATE_ID: int = 1
     APP_BASE_URL: str = "https://myquestspace.com"
     UNSUBSCRIBE_BASE_URL: str = "https://myquestspace.com/unsubscribe"
+
+    # Cron 配置
+    CRON_SECRET: str = ""
     
     # AI聊天配置
     CHAT_MODEL: str = "gpt-4o-mini"
