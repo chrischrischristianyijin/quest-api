@@ -101,7 +101,19 @@ async def get_stacks(
         # Get total count
         count_result = supabase.table('stacks').select('id', count='exact').eq('user_id', current_user['id']).execute()
         total = count_result.count or 0
-        
+
+        # Pre-fetch all insight counts in a single query to avoid N+1 problem
+        insights_count_map = {}
+        if not include_insights and result.data:
+            stack_ids = [stack['id'] for stack in result.data]
+            # Get counts grouped by stack_id in a single query
+            insights_query = supabase.table('insights').select('stack_id').in_('stack_id', stack_ids).execute()
+
+            # Build count map from results
+            for insight in insights_query.data:
+                stack_id = insight['stack_id']
+                insights_count_map[stack_id] = insights_count_map.get(stack_id, 0) + 1
+
         stacks = []
         for stack in result.data:
             # Count insights for this stack
@@ -109,10 +121,9 @@ async def get_stacks(
             if include_insights and 'insights' in stack:
                 insights_count = len(stack['insights'])
             else:
-                # Count insights separately if not included
-                count_result = supabase.table('insights').select('id', count='exact').eq('stack_id', stack['id']).execute()
-                insights_count = count_result.count or 0
-            
+                # Use pre-fetched count from map
+                insights_count = insights_count_map.get(stack['id'], 0)
+
             stacks.append(StackResponse(
                 id=stack['id'],
                 user_id=stack['user_id'],
